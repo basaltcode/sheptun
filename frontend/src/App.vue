@@ -429,6 +429,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { apiUrl } from './api.js'
 
 const fileInput = ref(null)
 const videoInput = ref(null)
@@ -494,7 +495,7 @@ const transcribeVideo = async () => {
       output_format: whisperSettings.value.outputFormat === 'txt' ? 'srt' : whisperSettings.value.outputFormat,
       task: whisperSettings.value.task
     })
-    const response = await fetch(`http://localhost:8000/transcribe/video?${params.toString()}`, {
+    const response = await fetch(`${await apiUrl('/transcribe/video')}?${params.toString()}`, {
       method: 'POST',
       body: formData
     })
@@ -522,7 +523,7 @@ const exportTelegramMessages = async (folderName) => {
   messageType.value = ''
   
   try {
-    const response = await fetch(`http://localhost:8000/telegram/folders/${encodeURIComponent(folderName)}/messages`)
+    const response = await fetch(await apiUrl(`/telegram/folders/${encodeURIComponent(folderName)}/messages`))
     const data = await response.json()
     
     if (response.ok) {
@@ -560,7 +561,7 @@ const transcribe = async () => {
       initial_prompt: whisperSettings.value.initialPrompt,
       task: whisperSettings.value.task
     })
-    const response = await fetch(`http://localhost:8000/transcribe?${params.toString()}`, {
+    const response = await fetch(`${await apiUrl('/transcribe')}?${params.toString()}`, {
       method: 'POST',
       body: formData
     })
@@ -587,7 +588,7 @@ const loadTelegramFolders = async () => {
   telegramFolders.value = []
   
   try {
-    const response = await fetch('http://localhost:8000/telegram/folders')
+    const response = await fetch(await apiUrl('/telegram/folders'))
     const data = await response.json()
     
     if (response.ok) {
@@ -611,7 +612,7 @@ const selectTelegramFolder = async (folderName) => {
   telegramFilesTotalDuration.value = 0
   
   try {
-    const response = await fetch(`http://localhost:8000/telegram/folders/${encodeURIComponent(folderName)}/files`)
+    const response = await fetch(await apiUrl(`/telegram/folders/${encodeURIComponent(folderName)}/files`))
     const data = await response.json()
     
     if (response.ok) {
@@ -657,7 +658,7 @@ const transcribeTelegram = async () => {
       initial_prompt: whisperSettings.value.initialPrompt
     })
     
-    const response = await fetch(`http://localhost:8000/transcribe/telegram?${params.toString()}`, {
+    const response = await fetch(`${await apiUrl('/transcribe/telegram')}?${params.toString()}`, {
       method: 'POST'
     })
     
@@ -674,7 +675,7 @@ const transcribeTelegram = async () => {
     
     currentTaskId.value = data.task_id
     
-    eventSource.value = new EventSource(`http://localhost:8000/progress/${data.task_id}`)
+    eventSource.value = new EventSource(await apiUrl(`/progress/${data.task_id}`))
     
       eventSource.value.onmessage = (event) => {
         try {
@@ -753,7 +754,7 @@ const stopTranscription = async () => {
   if (!currentTaskId.value) return
   
   try {
-    await fetch(`http://localhost:8000/transcribe/telegram/${currentTaskId.value}/stop`, {
+    await fetch(await apiUrl(`/transcribe/telegram/${currentTaskId.value}/stop`), {
       method: 'POST'
     })
   } catch (error) {

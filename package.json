@@ -1,0 +1,22 @@
+{
+  "name": "whisper-transcription",
+  "version": "1.0.0",
+  "description": "Desktop app for audio transcription using OpenAI Whisper",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:electron\"",
+    "dev:frontend": "cd frontend && npx vite",
+    "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "build:frontend": "cd frontend && npx vite build",
+    "build": "npm run build:frontend && electron-builder",
+    "build:mac": "npm run build:frontend && electron-builder --mac",
+    "build:win": "npm run build:frontend && electron-builder --win",
+    "build:linux": "npm run build:frontend && electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "concurrently": "^9.0.0",
+    "wait-on": "^8.0.0"
+  }
+}

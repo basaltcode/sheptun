@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 import subprocess
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import List, Dict
@@ -24,17 +25,17 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 DOWNLOADS_DIR = Path.home() / "Downloads"
-TELEGRAM_DIR = Path("/Users/niko/Downloads/Telegram Desktop")
+TELEGRAM_DIR = Path(os.environ.get("TELEGRAM_DIR", str(Path.home() / "Downloads" / "Telegram Desktop")))
 ALLOWED_EXTENSIONS = {".ogg", ".mp3", ".wav"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
-WHISPER_PYTHON = Path("/usr/bin/python3")
+WHISPER_PYTHON = Path(sys.executable)
 
 progress_store: Dict[str, Dict] = {}
 active_tasks: Dict[str, bool] = {}
