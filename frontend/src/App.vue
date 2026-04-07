@@ -1,6 +1,9 @@
 <template>
   <div class="container">
-    <h1>Sheptun</h1>
+    <div class="app-header">
+      <img src="/logo.png" alt="Sheptun" class="app-logo" />
+      <h1>Sheptun</h1>
+    </div>
     
     <div class="tabs">
       <button 
@@ -1271,8 +1274,20 @@ body {
   text-align: left;
 }
 
-h1 {
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   margin-bottom: 1.5rem;
+}
+
+.app-logo {
+  width: 40px;
+  height: 40px;
+}
+
+h1 {
+  margin: 0;
   color: #333;
 }
 

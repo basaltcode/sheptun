@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="preview.png" alt="Sheptun" width="600">
+</p>
+
 # Sheptun
 
 Open source приложение для локальной и бесплатной транскрибации аудио и видео с использованием Whisper от OpenAI. Всё работает на вашем компьютере — данные никуда не отправляются.
