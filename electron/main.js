@@ -15,7 +15,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: 'Whisper Транскрибация',
+    title: 'Sheptun',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -78,7 +78,7 @@ async function startBackend() {
   try {
     await ensureVenv(pythonCmd, (msg) => {
       if (mainWindow) {
-        mainWindow.setTitle(`Whisper — ${msg}`);
+        mainWindow.setTitle(`Sheptun — ${msg}`);
       }
     });
   } catch (err) {
@@ -145,7 +145,7 @@ app.whenReady().then(async () => {
   await startBackend();
 
   if (mainWindow) {
-    mainWindow.setTitle('Whisper Транскрибация');
+    mainWindow.setTitle('Sheptun');
     if (!isDev) {
       mainWindow.reload();
     }

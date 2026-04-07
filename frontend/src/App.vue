@@ -1,6 +1,6 @@
 <template>
   <div class="container">
-    <h1>Whisper Транскрибация</h1>
+    <h1>Sheptun</h1>
     
     <div class="tabs">
       <button 
@@ -15,8 +15,14 @@
       >
         🎬 Видео файлы
       </button>
-      <button 
-        @click="activeTab = 'telegram'" 
+      <button
+        @click="activeTab = 'youtube'"
+        :class="['tab-btn', { active: activeTab === 'youtube' }]"
+      >
+        YouTube
+      </button>
+      <button
+        @click="activeTab = 'telegram'"
         :class="['tab-btn', { active: activeTab === 'telegram' }]"
       >
         Импорт из Telegram
@@ -25,13 +31,14 @@
     
     <div v-if="activeTab === 'audio'" class="tab-content">
       <div class="section-card">
-        <h3 class="section-title">📁 Загрузка аудио файлов</h3>
+        <h3 class="section-title">📁 Аудио файлы</h3>
+        <p class="section-description">Транскрибация аудио файлов с компьютера. Загрузите файлы в формате OGG, MP3, WAV или M4A — текст будет сохранён в папку Downloads.</p>
         <div class="upload-area">
           <input
             type="file"
             ref="fileInput"
             @change="handleFileSelect"
-            accept=".ogg,.mp3,.wav"
+            accept=".ogg,.mp3,.wav,.m4a"
             :disabled="loading"
             multiple
           />
@@ -52,11 +59,11 @@
           <div class="setting-item">
             <label for="model-select-audio">Модель:</label>
             <select id="model-select-audio" v-model="whisperSettings.model" class="model-select">
-              <option value="tiny">Tiny (быстрая, низкая точность)</option>
-              <option value="base">Base (быстрая, средняя точность)</option>
-              <option value="small">Small (средняя скорость, хорошая точность)</option>
-              <option value="medium">Medium (медленная, высокая точность)</option>
-              <option value="large">Large (очень медленная, максимальная точность)</option>
+              <option value="tiny">Tiny — 39 MB, самая быстрая, низкая точность</option>
+              <option value="base">Base — 74 MB, быстрая, средняя точность</option>
+              <option value="small">Small — 244 MB, средняя скорость, хорошая точность</option>
+              <option value="medium">Medium — 769 MB, медленная, высокая точность</option>
+              <option value="large">Large — 1.5 GB, очень медленная, максимальная точность</option>
             </select>
           </div>
           
@@ -110,14 +117,21 @@
           >
             {{ loading ? 'Распознавание...' : '🎵 Распознать аудио' }}
           </button>
+          <button
+            v-if="loading && currentTaskId"
+            @click="stopTranscription"
+            class="stop-btn"
+          >
+            ⏹ Остановить
+          </button>
         </div>
       </div>
     </div>
     
     <div v-if="activeTab === 'video'" class="tab-content">
       <div class="section-card">
-        <h3 class="section-title">🎬 Загрузка видео файлов</h3>
-        <p class="section-description">Для создания субтитров в формате SRT, VTT и других</p>
+        <h3 class="section-title">🎬 Видео файлы</h3>
+        <p class="section-description">Создание субтитров из видео файлов с компьютера. Загрузите файлы в формате MP4, AVI, MOV, MKV или WEBM — субтитры будут сохранены в папку Downloads.</p>
         <div class="upload-area">
           <input
             type="file"
@@ -144,11 +158,11 @@
           <div class="setting-item">
             <label for="model-select-video">Модель:</label>
             <select id="model-select-video" v-model="whisperSettings.model" class="model-select">
-              <option value="tiny">Tiny (быстрая, низкая точность)</option>
-              <option value="base">Base (быстрая, средняя точность)</option>
-              <option value="small">Small (средняя скорость, хорошая точность)</option>
-              <option value="medium">Medium (медленная, высокая точность)</option>
-              <option value="large">Large (очень медленная, максимальная точность)</option>
+              <option value="tiny">Tiny — 39 MB, самая быстрая, низкая точность</option>
+              <option value="base">Base — 74 MB, быстрая, средняя точность</option>
+              <option value="small">Small — 244 MB, средняя скорость, хорошая точность</option>
+              <option value="medium">Medium — 769 MB, медленная, высокая точность</option>
+              <option value="large">Large — 1.5 GB, очень медленная, максимальная точность</option>
             </select>
           </div>
           
@@ -206,9 +220,105 @@
       </div>
     </div>
     
+    <div v-if="activeTab === 'youtube'" class="tab-content">
+      <div class="section-card">
+        <h3 class="section-title">YouTube</h3>
+        <p class="section-description">Транскрибация видео с YouTube. Вставьте ссылку — аудио будет скачано и распознано, результат сохранится в папку Downloads.</p>
+        <div class="setting-item">
+          <label for="youtube-url">Ссылка на видео:</label>
+          <input
+            id="youtube-url"
+            v-model="youtubeUrl"
+            type="text"
+            class="youtube-url-input"
+            placeholder="https://www.youtube.com/watch?v=..."
+            :disabled="loading"
+          />
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h3 class="section-title">Настройки обработки</h3>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label for="model-select-youtube">Модель:</label>
+            <select id="model-select-youtube" v-model="whisperSettings.model" class="model-select">
+              <option value="tiny">Tiny — 39 MB, самая быстрая, низкая точность</option>
+              <option value="base">Base — 74 MB, быстрая, средняя точность</option>
+              <option value="small">Small — 244 MB, средняя скорость, хорошая точность</option>
+              <option value="medium">Medium — 769 MB, медленная, высокая точность</option>
+              <option value="large">Large — 1.5 GB, очень медленная, максимальная точность</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="language-select-youtube">Язык:</label>
+            <select id="language-select-youtube" v-model="whisperSettings.language" class="model-select">
+              <option value="Russian">Русский</option>
+              <option value="English">Английский</option>
+              <option value="Ukrainian">Украинский</option>
+              <option value="">Автоопределение</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="output-format-select-youtube">Формат вывода:</label>
+            <select id="output-format-select-youtube" v-model="whisperSettings.outputFormat" class="model-select">
+              <option value="txt">TXT</option>
+              <option value="srt">SRT</option>
+              <option value="vtt">VTT</option>
+              <option value="json">JSON</option>
+              <option value="tsv">TSV</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="task-select-youtube">Задача:</label>
+            <select id="task-select-youtube" v-model="whisperSettings.task" class="model-select">
+              <option value="transcribe">Транскрибация (speech-to-text)</option>
+              <option value="translate">Перевод (speech-to-English)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-item full-width">
+          <label for="initial-prompt-youtube">Начальный промпт:</label>
+          <textarea
+            id="initial-prompt-youtube"
+            v-model="whisperSettings.initialPrompt"
+            class="prompt-textarea"
+            placeholder="Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией."
+          ></textarea>
+        </div>
+      </div>
+
+      <div class="section-card actions-card">
+        <div class="buttons-group">
+          <button
+            @click="transcribeYoutube"
+            :disabled="!youtubeUrl || loading"
+            class="transcribe-btn youtube-btn"
+          >
+            {{ loading ? 'Обработка...' : 'Транскрибировать' }}
+          </button>
+          <button
+            v-if="loading && currentTaskId"
+            @click="stopTranscription"
+            class="stop-btn"
+          >
+            Остановить
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="activeTab === 'telegram'" class="tab-content">
+      <div class="section-card" style="margin-bottom: 1.5rem;">
+        <h3 class="section-title">Импорт из Telegram</h3>
+        <p class="section-description">Транскрибация голосовых сообщений из экспорта Telegram Desktop. Экспортируйте чат через Telegram Desktop, папка ChatExport появится в Downloads — выберите её ниже.</p>
+      </div>
       <div v-if="!selectedTelegramFolder" class="telegram-section">
-        <button 
+        <button
           @click="loadTelegramFolders" 
           :disabled="loadingFolders"
           class="telegram-btn"
@@ -361,18 +471,32 @@
         <div class="wave-bar"></div>
         <div class="wave-bar"></div>
       </div>
-      <p v-if="progress.status === 'processing'">
+      <p v-if="progress.modelDownloadProgress !== undefined && progress.modelDownloadProgress < 100">
         {{ progress.message }}
       </p>
+      <p v-else-if="progress.status === 'processing'">
+        {{ progress.message }}
+      </p>
+      <p v-else-if="progress.status === 'downloading'">{{ progress.message }}</p>
       <p v-else-if="progress.status === 'starting'">Начало обработки...</p>
       <p v-else>Обработка файлов...</p>
-      
+
       <div class="progress-section">
+        <div v-if="progress.modelDownloadProgress !== undefined && progress.modelDownloadProgress < 100" class="model-download-section">
+          <div class="current-file-info">
+            <span>Загрузка модели (нужно только при первом использовании)</span>
+            <span>{{ progress.modelDownloadProgress }}%</span>
+          </div>
+          <div class="progress-bar model-download-bar">
+            <div class="progress-fill model-download-fill" :style="{ width: progress.modelDownloadProgress + '%' }"></div>
+          </div>
+        </div>
+
         <div v-if="progress.total > 0" class="progress-info">
           <span>Общий прогресс: {{ progress.current }} / {{ progress.total }} файлов</span>
           <span>{{ progressPercent }}%</span>
         </div>
-        
+
         <div class="time-info">
           <div class="time-item">
             <span class="time-label">Прошло времени:</span>
@@ -386,8 +510,8 @@
         <div v-if="progress.total > 0" class="progress-bar">
           <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
         </div>
-        
-        <div v-if="progress.currentFile" class="current-file-section">
+
+        <div v-if="progress.currentFile && !(progress.modelDownloadProgress !== undefined && progress.modelDownloadProgress < 100)" class="current-file-section">
           <div class="current-file-info">
             <span>Текущий файл: {{ shortenFileName(progress.currentFile) }}</span>
             <span>{{ progress.currentFileProgress || 0 }}%</span>
@@ -422,7 +546,22 @@
     </div>
     
     <div v-if="message" :class="['message', messageType]">
-      {{ message }}
+      <div v-if="messageType === 'success' && outputFileName" class="result-block">
+        <div class="result-text">{{ message }}</div>
+        <div class="result-file">
+          <label class="result-label">Имя файла:</label>
+          <div class="rename-row">
+            <input
+              v-model="outputFileName"
+              class="rename-input"
+              @keydown.enter="renameOutput"
+            />
+            <button @click="renameOutput" class="rename-btn" :disabled="outputFileName === outputFileNameOriginal">Переименовать</button>
+          </div>
+        </div>
+        <button @click="openDownloads" class="open-folder-btn">Открыть папку Downloads</button>
+      </div>
+      <template v-else>{{ message }}</template>
     </div>
   </div>
 </template>
@@ -451,6 +590,9 @@ const telegramFilesTotalSize = ref(0)
 const telegramFilesTotalDuration = ref(0)
 const loadingFolders = ref(false)
 const currentTaskId = ref(null)
+const youtubeUrl = ref('')
+const outputFileName = ref('')
+const outputFileNameOriginal = ref('')
 const eventSource = ref(null)
 const whisperSettings = ref({
   model: 'small',
@@ -517,6 +659,129 @@ const transcribeVideo = async () => {
   }
 }
 
+const transcribeYoutube = async () => {
+  if (!youtubeUrl.value) return
+
+  loading.value = true
+  message.value = ''
+  messageType.value = ''
+  progress.value = { current: 0, total: 0, currentFile: '', currentFileProgress: 0, message: '', status: '', whisperLogs: [], lastLog: '', elapsed_seconds: 0, estimated_remaining_seconds: null, start_time: null }
+  startTime.value = null
+  elapsedTime.value = 0
+  estimatedRemaining.value = null
+  currentTaskId.value = null
+  outputFileName.value = ''
+  outputFileNameOriginal.value = ''
+
+  if (eventSource.value) {
+    eventSource.value.close()
+    eventSource.value = null
+  }
+
+  try {
+    const params = new URLSearchParams({
+      url: youtubeUrl.value,
+      model: whisperSettings.value.model,
+      language: whisperSettings.value.language || '',
+      output_format: whisperSettings.value.outputFormat,
+      initial_prompt: whisperSettings.value.initialPrompt,
+      task: whisperSettings.value.task
+    })
+
+    const response = await fetch(`${await apiUrl('/transcribe/youtube')}?${params.toString()}`, {
+      method: 'POST'
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.detail || 'Ошибка при запуске транскрибации')
+    }
+
+    const data = await response.json()
+
+    if (!data.task_id) {
+      throw new Error('Не получен task_id от сервера')
+    }
+
+    currentTaskId.value = data.task_id
+
+    eventSource.value = new EventSource(await apiUrl(`/progress/${data.task_id}`))
+
+    eventSource.value.onmessage = (event) => {
+      try {
+        const progressData = JSON.parse(event.data)
+        progress.value = {
+          current: progressData.current || 0,
+          total: progressData.total || 0,
+          currentFile: progressData.current_file || '',
+          currentFileProgress: progressData.current_file_progress || 0,
+          modelDownloadProgress: progressData.model_download_progress,
+          message: progressData.message || '',
+          status: progressData.status || '',
+          whisperLogs: progressData.whisper_logs || [],
+          lastLog: progressData.last_log || '',
+          elapsed_seconds: progressData.elapsed_seconds || 0,
+          estimated_remaining_seconds: progressData.estimated_remaining_seconds || null,
+          start_time: progressData.start_time || null
+        }
+
+        if (progressData.start_time && !startTime.value) {
+          startTime.value = progressData.start_time
+        }
+        if (progressData.elapsed_seconds !== undefined) {
+          elapsedTime.value = progressData.elapsed_seconds
+        }
+        estimatedRemaining.value = progressData.estimated_remaining_seconds || null
+
+        if (progressData.status === 'completed') {
+          playCompletionSound()
+          message.value = progressData.message || 'Обработка завершена'
+          messageType.value = 'success'
+          outputFileName.value = progressData.output_file || ''
+          outputFileNameOriginal.value = progressData.output_file || ''
+          loading.value = false
+          if (eventSource.value) {
+            eventSource.value.close()
+            eventSource.value = null
+          }
+          currentTaskId.value = null
+        } else if (progressData.status === 'error' || progressData.status === 'cancelled') {
+          message.value = progressData.message || (progressData.status === 'cancelled' ? 'Обработка остановлена' : 'Произошла ошибка')
+          messageType.value = progressData.status === 'cancelled' ? 'warning' : 'error'
+          loading.value = false
+          if (eventSource.value) {
+            eventSource.value.close()
+            eventSource.value = null
+          }
+          currentTaskId.value = null
+        }
+      } catch (parseError) {
+        console.error('Ошибка парсинга данных прогресса:', parseError)
+      }
+    }
+
+    eventSource.value.onerror = (error) => {
+      console.error('SSE connection error:', error)
+      if (eventSource.value) {
+        eventSource.value.close()
+        eventSource.value = null
+      }
+      if (progress.value.status !== 'completed' && progress.value.status !== 'error') {
+        message.value = 'Ошибка соединения с сервером'
+        messageType.value = 'error'
+        loading.value = false
+        currentTaskId.value = null
+      }
+    }
+  } catch (error) {
+    console.error('Ошибка при запуске транскрибации YouTube:', error)
+    message.value = error.message || 'Ошибка соединения с сервером'
+    messageType.value = 'error'
+    loading.value = false
+    currentTaskId.value = null
+  }
+}
+
 const exportTelegramMessages = async (folderName) => {
   loading.value = true
   message.value = ''
@@ -543,16 +808,28 @@ const exportTelegramMessages = async (folderName) => {
 
 const transcribe = async () => {
   if (selectedFiles.value.length === 0) return
-  
+
   loading.value = true
   message.value = ''
   messageType.value = ''
-  
+  progress.value = { current: 0, total: 0, currentFile: '', currentFileProgress: 0, message: '', status: '', whisperLogs: [], lastLog: '', elapsed_seconds: 0, estimated_remaining_seconds: null, start_time: null }
+  startTime.value = null
+  elapsedTime.value = 0
+  estimatedRemaining.value = null
+  currentTaskId.value = null
+  outputFileName.value = ''
+  outputFileNameOriginal.value = ''
+
+  if (eventSource.value) {
+    eventSource.value.close()
+    eventSource.value = null
+  }
+
   const formData = new FormData()
   selectedFiles.value.forEach(file => {
     formData.append('files', file)
   })
-  
+
   try {
     const params = new URLSearchParams({
       model: whisperSettings.value.model,
@@ -565,21 +842,94 @@ const transcribe = async () => {
       method: 'POST',
       body: formData
     })
-    
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.detail || 'Ошибка при запуске транскрибации')
+    }
+
     const data = await response.json()
-    
-    if (response.ok) {
-      message.value = data.message
-      messageType.value = 'success'
-    } else {
-      message.value = data.detail || 'Произошла ошибка'
-      messageType.value = 'error'
+
+    if (!data.task_id) {
+      throw new Error('Не получен task_id от сервера')
+    }
+
+    currentTaskId.value = data.task_id
+
+    eventSource.value = new EventSource(await apiUrl(`/progress/${data.task_id}`))
+
+    eventSource.value.onmessage = (event) => {
+      try {
+        const progressData = JSON.parse(event.data)
+        progress.value = {
+          current: progressData.current || 0,
+          total: progressData.total || 0,
+          currentFile: progressData.current_file || '',
+          currentFileProgress: progressData.current_file_progress || 0,
+          modelDownloadProgress: progressData.model_download_progress,
+          message: progressData.message || '',
+          status: progressData.status || '',
+          whisperLogs: progressData.whisper_logs || [],
+          lastLog: progressData.last_log || '',
+          elapsed_seconds: progressData.elapsed_seconds || 0,
+          estimated_remaining_seconds: progressData.estimated_remaining_seconds || null,
+          start_time: progressData.start_time || null
+        }
+
+        if (progressData.start_time && !startTime.value) {
+          startTime.value = progressData.start_time
+        }
+        if (progressData.elapsed_seconds !== undefined) {
+          elapsedTime.value = progressData.elapsed_seconds
+        }
+        estimatedRemaining.value = progressData.estimated_remaining_seconds || null
+
+        if (progressData.status === 'completed') {
+          playCompletionSound()
+          message.value = progressData.message || 'Обработка завершена'
+          messageType.value = 'success'
+          outputFileName.value = progressData.output_file || ''
+          outputFileNameOriginal.value = progressData.output_file || ''
+          loading.value = false
+          if (eventSource.value) {
+            eventSource.value.close()
+            eventSource.value = null
+          }
+          currentTaskId.value = null
+        } else if (progressData.status === 'error' || progressData.status === 'cancelled') {
+          message.value = progressData.message || (progressData.status === 'cancelled' ? 'Обработка остановлена' : 'Произошла ошибка')
+          messageType.value = progressData.status === 'cancelled' ? 'warning' : 'error'
+          loading.value = false
+          if (eventSource.value) {
+            eventSource.value.close()
+            eventSource.value = null
+          }
+          currentTaskId.value = null
+        }
+      } catch (parseError) {
+        console.error('Ошибка парсинга данных прогресса:', parseError)
+      }
+    }
+
+    eventSource.value.onerror = (error) => {
+      console.error('SSE connection error:', error)
+      if (eventSource.value) {
+        eventSource.value.close()
+        eventSource.value = null
+      }
+      if (progress.value.status !== 'completed' && progress.value.status !== 'error') {
+        message.value = 'Ошибка соединения с сервером'
+        messageType.value = 'error'
+        loading.value = false
+        currentTaskId.value = null
+      }
     }
   } catch (error) {
-    message.value = 'Ошибка соединения с сервером'
+    console.error('Ошибка при запуске транскрибации:', error)
+    message.value = error.message || 'Ошибка соединения с сервером'
     messageType.value = 'error'
-  } finally {
     loading.value = false
+    currentTaskId.value = null
   }
 }
 
@@ -643,7 +993,9 @@ const transcribeTelegram = async () => {
   elapsedTime.value = 0
   estimatedRemaining.value = null
   currentTaskId.value = null
-  
+  outputFileName.value = ''
+  outputFileNameOriginal.value = ''
+
   if (eventSource.value) {
     eventSource.value.close()
     eventSource.value = null
@@ -707,6 +1059,8 @@ const transcribeTelegram = async () => {
           playCompletionSound()
           message.value = progressData.message || 'Обработка завершена'
           messageType.value = 'success'
+          outputFileName.value = progressData.output_file || ''
+          outputFileNameOriginal.value = progressData.output_file || ''
           loading.value = false
           if (eventSource.value) {
             eventSource.value.close()
@@ -752,13 +1106,46 @@ const transcribeTelegram = async () => {
 
 const stopTranscription = async () => {
   if (!currentTaskId.value) return
-  
+
   try {
-    await fetch(await apiUrl(`/transcribe/telegram/${currentTaskId.value}/stop`), {
-      method: 'POST'
-    })
+    // Try both stop endpoints
+    const urls = [
+      await apiUrl(`/transcribe/${currentTaskId.value}/stop`),
+      await apiUrl(`/transcribe/telegram/${currentTaskId.value}/stop`)
+    ]
+    await Promise.allSettled(urls.map(url => fetch(url, { method: 'POST' })))
   } catch (error) {
     console.error('Ошибка остановки:', error)
+  }
+}
+
+const renameOutput = async () => {
+  if (!outputFileName.value || outputFileName.value === outputFileNameOriginal.value) return
+  try {
+    const params = new URLSearchParams({
+      old_name: outputFileNameOriginal.value,
+      new_name: outputFileName.value
+    })
+    const response = await fetch(`${await apiUrl('/rename-output')}?${params.toString()}`, { method: 'POST' })
+    const data = await response.json()
+    if (response.ok) {
+      outputFileNameOriginal.value = outputFileName.value
+      message.value = data.message
+    } else {
+      message.value = data.detail || 'Ошибка переименования'
+      messageType.value = 'error'
+    }
+  } catch (error) {
+    message.value = 'Ошибка соединения с сервером'
+    messageType.value = 'error'
+  }
+}
+
+const openDownloads = async () => {
+  try {
+    await fetch(await apiUrl('/open-downloads'))
+  } catch (error) {
+    console.error('Ошибка открытия папки:', error)
   }
 }
 
@@ -1415,6 +1802,32 @@ input[type="file"]:disabled {
   font-weight: 500;
 }
 
+.youtube-url-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.youtube-url-input:focus {
+  outline: none;
+  border-color: #ff0000;
+}
+
+.youtube-btn {
+  background: #ff0000;
+  flex: 1;
+  min-width: 200px;
+}
+
+.youtube-btn:hover:not(:disabled) {
+  background: #cc0000;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(255,0,0,0.3);
+}
+
 .stop-btn {
   background: #dc3545;
   color: white;
@@ -1441,6 +1854,24 @@ input[type="file"]:disabled {
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
   color: #666;
+}
+
+.model-download-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 8px;
+}
+
+.model-download-bar {
+  height: 24px;
+  border-radius: 12px;
+  margin-top: 0.5rem;
+}
+
+.model-download-fill {
+  background: #ffc107;
 }
 
 .current-file-section {
@@ -1470,6 +1901,84 @@ input[type="file"]:disabled {
   background: #28a745;
   transition: width 0.3s ease;
   border-radius: 10px;
+}
+
+.result-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.result-text {
+  font-weight: 600;
+}
+
+.result-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.result-label {
+  font-size: 0.85rem;
+  color: #155724;
+  font-weight: 500;
+}
+
+.rename-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.rename-input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: white;
+}
+
+.rename-input:focus {
+  outline: none;
+  border-color: #28a745;
+}
+
+.rename-btn {
+  padding: 0.4rem 1rem;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s;
+}
+
+.rename-btn:hover:not(:disabled) {
+  background: #218838;
+}
+
+.rename-btn:disabled {
+  background: #94d3a2;
+  cursor: default;
+}
+
+.open-folder-btn {
+  padding: 0.5rem 1rem;
+  background: #17a2b8;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+  align-self: flex-start;
+}
+
+.open-folder-btn:hover {
+  background: #138496;
 }
 
 .message.warning {

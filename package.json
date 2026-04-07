@@ -1,5 +1,5 @@
 {
-  "name": "whisper-transcription",
+  "name": "sheptun",
   "version": "1.0.0",
   "description": "Desktop app for audio transcription using OpenAI Whisper",
   "main": "electron/main.js",

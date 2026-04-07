@@ -14,6 +14,7 @@ import uuid
 import re
 from datetime import datetime
 from mutagen import File as MutagenFile
+import shutil
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="whisper")
@@ -33,12 +34,323 @@ app.add_middleware(
 
 DOWNLOADS_DIR = Path.home() / "Downloads"
 TELEGRAM_DIR = Path(os.environ.get("TELEGRAM_DIR", str(Path.home() / "Downloads" / "Telegram Desktop")))
-ALLOWED_EXTENSIONS = {".ogg", ".mp3", ".wav"}
+ALLOWED_EXTENSIONS = {".ogg", ".mp3", ".wav", ".m4a"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
 WHISPER_PYTHON = Path(sys.executable)
 
 progress_store: Dict[str, Dict] = {}
 active_tasks: Dict[str, bool] = {}
+
+async def process_audio_files_async(
+    file_paths: List[dict],
+    task_id: str,
+    model: str = "small",
+    language: str = "Russian",
+    output_format: str = "txt",
+    initial_prompt: str = "",
+    task: str = "transcribe"
+):
+    import threading
+    import queue
+
+    try:
+        active_tasks[task_id] = True
+        task_start_time = datetime.now()
+        total_files = len(file_paths)
+
+        progress_store[task_id] = {
+            "status": "processing",
+            "current": 0,
+            "total": total_files,
+            "current_file": "",
+            "current_file_progress": 0,
+            "message": f"Найдено {total_files} файлов",
+            "whisper_logs": [],
+            "last_log": "",
+            "start_time": task_start_time.timestamp(),
+            "elapsed_seconds": 0,
+            "estimated_remaining_seconds": None,
+            "previous_total_progress": 0,
+            "previous_total_time": 0,
+            "total_progress_speed_history": []
+        }
+
+        all_texts = []
+
+        for idx, file_info in enumerate(file_paths, 1):
+            if not active_tasks.get(task_id, True):
+                progress_store[task_id]["status"] = "cancelled"
+                progress_store[task_id]["message"] = "Обработка остановлена пользователем"
+                return
+
+            tmp_path = file_info["tmp_path"]
+            original_name = file_info["name"]
+            file_path = Path(tmp_path)
+
+            try:
+                file_duration = get_audio_duration(file_path)
+                estimated_processing_time = file_duration * 0.1 if file_duration > 0 else 300
+            except Exception:
+                file_duration = 0
+                estimated_processing_time = 300
+
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+
+            progress_store[task_id].update({
+                "status": "processing",
+                "current": idx,
+                "current_file": original_name,
+                "current_file_progress": 0,
+                "message": f"Обработка файла {idx}/{total_files}: {original_name} ({file_size_mb:.2f} MB)",
+                "whisper_logs": [],
+                "last_log": ""
+            })
+
+            whisper_cmd = [
+                str(WHISPER_PYTHON), "-m", "whisper",
+                str(tmp_path),
+                "--model", model,
+                "--task", task,
+                "--output_format", output_format,
+                "--output_dir", str(DOWNLOADS_DIR),
+                "--verbose", "False"
+            ]
+
+            if language:
+                whisper_cmd.extend(["--language", language])
+            if initial_prompt:
+                whisper_cmd.extend(["--initial_prompt", initial_prompt])
+
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+
+            process = subprocess.Popen(
+                whisper_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=0,
+                env=env
+            )
+
+            log_queue = queue.Queue()
+
+            def read_stream(stream, stream_name):
+                try:
+                    while True:
+                        line = stream.readline()
+                        if not line:
+                            break
+                        line = line.rstrip()
+                        if line:
+                            log_queue.put((stream_name, line))
+                except Exception as e:
+                    logger.error(f"Ошибка чтения {stream_name}: {str(e)}")
+                finally:
+                    try:
+                        stream.close()
+                    except:
+                        pass
+
+            stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, 'stdout'), daemon=True)
+            stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, 'stderr'), daemon=True)
+            stdout_thread.start()
+            stderr_thread.start()
+
+            start_time = datetime.now()
+            last_eta_update = 0
+            whisper_logs = []
+            whisper_reported_progress = False
+            model_downloading = False
+
+            while process.poll() is None:
+                if not active_tasks.get(task_id, True):
+                    process.terminate()
+                    process.wait()
+                    progress_store[task_id]["status"] = "cancelled"
+                    progress_store[task_id]["message"] = "Обработка остановлена пользователем"
+                    return
+
+                while not log_queue.empty():
+                    try:
+                        stream_type, line = log_queue.get_nowait()
+                        log_entry = f"[{stream_type.upper()}] {line}"
+                        whisper_logs.append(log_entry)
+                        if len(whisper_logs) > 100:
+                            whisper_logs = whisper_logs[-100:]
+
+                        if stream_type == 'stderr':
+                            # Detect model download vs transcription
+                            is_model_download = 'MiB/s' in line or 'MB/s' in line or 'kB/s' in line
+                            is_transcription = 'frames/s' in line or 'it/s' in line
+
+                            if is_model_download and not is_transcription:
+                                model_downloading = True
+                                percent_match = re.search(r'(\d+)%', line)
+                                if percent_match:
+                                    dl_pct = int(percent_match.group(1))
+                                    progress_store[task_id]["model_download_progress"] = dl_pct
+                                    progress_store[task_id]["message"] = f"Загрузка модели {model}... {dl_pct}%"
+                                    # Don't update file progress during model download
+                            else:
+                                if model_downloading:
+                                    model_downloading = False
+                                    progress_store[task_id]["model_download_progress"] = 100
+                                    progress_store[task_id]["message"] = f"Обработка файла {idx}/{total_files}: {original_name} ({file_size_mb:.2f} MB)"
+
+                                percent_match = re.search(r'(\d+)%', line)
+                                if percent_match:
+                                    whisper_reported_progress = True
+                                    progress_store[task_id]["current_file_progress"] = min(int(percent_match.group(1)), 99)
+
+                        progress_store[task_id]["whisper_logs"] = whisper_logs[-20:]
+                        progress_store[task_id]["last_log"] = log_entry
+                    except queue.Empty:
+                        break
+
+                elapsed = (datetime.now() - start_time).total_seconds()
+                total_elapsed = (datetime.now() - task_start_time).total_seconds()
+
+                if not whisper_reported_progress and estimated_processing_time > 0:
+                    file_progress = min(int((elapsed / estimated_processing_time) * 100), 95)
+                    current_stored = progress_store[task_id].get("current_file_progress", 0)
+                    if file_progress > current_stored:
+                        progress_store[task_id]["current_file_progress"] = file_progress
+
+                progress_store[task_id]["elapsed_seconds"] = int(total_elapsed)
+
+                total_progress = ((idx - 1) / total_files * 100) + (progress_store[task_id]["current_file_progress"] / total_files)
+                progress_store[task_id]["total_progress"] = total_progress
+
+                if total_elapsed >= last_eta_update + 30:
+                    prev_total_time = progress_store[task_id].get("previous_total_time", 0)
+                    prev_total_progress = progress_store[task_id].get("previous_total_progress", 0)
+                    total_speed_history = progress_store[task_id].get("total_progress_speed_history", [])
+
+                    if prev_total_time > 0:
+                        time_delta = total_elapsed - prev_total_time
+                        progress_delta = total_progress - prev_total_progress
+                        if time_delta > 0 and progress_delta > 0:
+                            speed = progress_delta / time_delta
+                            total_speed_history.append(speed)
+                            if len(total_speed_history) > 5:
+                                total_speed_history.pop(0)
+                            if total_speed_history:
+                                avg_speed = sum(total_speed_history) / len(total_speed_history)
+                                if avg_speed > 0 and total_progress < 100:
+                                    remaining_progress = 100 - total_progress
+                                    progress_store[task_id]["estimated_remaining_seconds"] = int(remaining_progress / avg_speed)
+
+                    progress_store[task_id]["previous_total_time"] = total_elapsed
+                    progress_store[task_id]["previous_total_progress"] = total_progress
+                    progress_store[task_id]["total_progress_speed_history"] = total_speed_history
+                    last_eta_update = total_elapsed
+
+                await asyncio.sleep(0.2)
+
+            process.wait()
+            stdout_thread.join(timeout=2)
+            stderr_thread.join(timeout=2)
+
+            while not log_queue.empty():
+                try:
+                    stream_type, line = log_queue.get_nowait()
+                    whisper_logs.append(f"[{stream_type.upper()}] {line}")
+                except queue.Empty:
+                    break
+
+            if process.returncode != 0:
+                logger.warning(f"Ошибка обработки {original_name}")
+                progress_store[task_id]["current_file_progress"] = 0
+                progress_store[task_id]["last_log"] = f"Ошибка обработки {original_name}"
+                continue
+
+            progress_store[task_id]["current_file_progress"] = 100
+            progress_store[task_id]["last_log"] = f"Файл {original_name} обработан успешно"
+
+            base_name = Path(original_name).stem
+            output_ext = f".{output_format}" if output_format != "txt" else ".txt"
+
+            # whisper saves with tmp file stem, rename to original name
+            tmp_stem = Path(tmp_path).stem
+            whisper_output = DOWNLOADS_DIR / f"{tmp_stem}{output_ext}"
+            final_output = DOWNLOADS_DIR / f"{base_name}{output_ext}"
+
+            if whisper_output.exists():
+                if output_format == "txt":
+                    with open(whisper_output, "r", encoding="utf-8") as f:
+                        all_texts.append(f.read())
+                    whisper_output.unlink()
+                else:
+                    if final_output.exists():
+                        final_output.unlink()
+                    whisper_output.rename(final_output)
+
+            # clean extra formats
+            for ext in [".srt", ".vtt", ".json", ".tsv", ".txt"]:
+                extra = DOWNLOADS_DIR / f"{tmp_stem}{ext}"
+                if extra.exists():
+                    extra.unlink()
+
+        # cleanup temp files
+        for file_info in file_paths:
+            try:
+                os.unlink(file_info["tmp_path"])
+            except:
+                pass
+
+        output_file_name = ""
+        if output_format == "txt":
+            if not all_texts:
+                progress_store[task_id] = {
+                    "status": "error",
+                    "current": total_files,
+                    "total": total_files,
+                    "current_file": "",
+                    "current_file_progress": 0,
+                    "message": "Не удалось обработать файлы"
+                }
+                return
+
+            merged_text = "\n\n".join(all_texts)
+            if total_files == 1:
+                out_name = Path(file_paths[0]["name"]).stem + ".txt"
+            else:
+                out_name = "merged.txt"
+            merged_file = DOWNLOADS_DIR / out_name
+            with open(merged_file, "w", encoding="utf-8") as f:
+                f.write(merged_text)
+            output_file_name = out_name
+        else:
+            if total_files == 1:
+                output_file_name = Path(file_paths[0]["name"]).stem + f".{output_format}"
+            else:
+                output_file_name = ""
+
+        progress_store[task_id] = {
+            "status": "completed",
+            "current": total_files,
+            "total": total_files,
+            "current_file": "",
+            "current_file_progress": 100,
+            "message": "Готово. Файл сохранён в Downloads",
+            "output_file": output_file_name,
+            "output_dir": str(DOWNLOADS_DIR)
+        }
+    except Exception as e:
+        logger.error(f"Ошибка: {str(e)}")
+        progress_store[task_id] = {
+            "status": "error",
+            "current": progress_store.get(task_id, {}).get("current", 0),
+            "total": progress_store.get(task_id, {}).get("total", 0),
+            "current_file": "",
+            "current_file_progress": 0,
+            "message": f"Ошибка: {str(e)}"
+        }
+    finally:
+        if task_id in active_tasks:
+            del active_tasks[task_id]
+
 
 @app.post("/transcribe")
 async def transcribe_audio(
@@ -46,92 +358,63 @@ async def transcribe_audio(
     model: str = "small",
     language: str = "Russian",
     output_format: str = "txt",
-    initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией."
+    initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.",
+    task: str = "transcribe",
+    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Файлы не выбраны")
-    
-    all_texts = []
-    temp_files = []
-    
+
     valid_models = ["tiny", "base", "small", "medium", "large"]
     if model not in valid_models:
         model = "small"
-    
-    whisper_cmd = [
-        str(WHISPER_PYTHON), "-m", "whisper",
-        "--model", model,
-        "--output_format", output_format,
-        "--output_dir", str(DOWNLOADS_DIR)
-    ]
-    
-    if language:
-        whisper_cmd.extend(["--language", language])
-    
-    if initial_prompt:
-        whisper_cmd.extend(["--initial_prompt", initial_prompt])
-    
-    try:
-        for file in files:
-            if not file.filename:
-                continue
-            
-            file_ext = Path(file.filename).suffix.lower()
-            if file_ext not in ALLOWED_EXTENSIONS:
-                continue
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
-                content = await file.read()
-                tmp_file.write(content)
-                tmp_path = tmp_file.name
-                temp_files.append(tmp_path)
-            
-            cmd = whisper_cmd + [tmp_path]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600
-            )
-            
-            if result.returncode != 0:
-                continue
-            
-            base_name = Path(file.filename).stem
-            txt_file = DOWNLOADS_DIR / f"{base_name}.txt"
-            
-            for ext in [".srt", ".vtt", ".json", ".tsv"]:
-                extra_file = DOWNLOADS_DIR / f"{base_name}{ext}"
-                if extra_file.exists():
-                    os.unlink(extra_file)
-            
-            if txt_file.exists():
-                with open(txt_file, "r", encoding="utf-8") as f:
-                    all_texts.append(f.read())
-                txt_file.unlink()
-        
-        if not all_texts:
-            raise HTTPException(status_code=500, detail="Не удалось обработать файлы")
-        
-        merged_text = "\n\n".join(all_texts)
-        merged_file = DOWNLOADS_DIR / "merged.txt"
-        
-        with open(merged_file, "w", encoding="utf-8") as f:
-            f.write(merged_text)
-        
-        return JSONResponse(
-            status_code=200,
-            content={"message": "Готово. Файл сохранён в Downloads"}
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Таймаут транскрибации")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
-    finally:
-        for tmp_path in temp_files:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+
+    # Save uploaded files to temp
+    file_paths = []
+    for file in files:
+        if not file.filename:
+            continue
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            continue
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            file_paths.append({"tmp_path": tmp_file.name, "name": file.filename})
+
+    if not file_paths:
+        raise HTTPException(status_code=400, detail="Нет подходящих файлов")
+
+    task_id = str(uuid.uuid4())
+    active_tasks[task_id] = True
+    progress_store[task_id] = {
+        "status": "starting",
+        "current": 0,
+        "total": len(file_paths),
+        "current_file": "",
+        "current_file_progress": 0,
+        "message": "Начало обработки...",
+        "whisper_logs": [],
+        "last_log": ""
+    }
+
+    background_tasks.add_task(
+        process_audio_files_async,
+        file_paths, task_id, model, language, output_format, initial_prompt, task
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content={"task_id": task_id, "message": "Обработка начата"}
+    )
+
+
+@app.post("/transcribe/{task_id}/stop")
+async def stop_audio_transcription(task_id: str):
+    if task_id in active_tasks:
+        active_tasks[task_id] = False
+        return JSONResponse(status_code=200, content={"message": "Остановка обработки..."})
+    return JSONResponse(status_code=404, content={"message": "Задача не найдена"})
 
 @app.get("/telegram/folders")
 async def get_telegram_folders():
@@ -754,6 +1037,225 @@ async def transcribe_video(
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
+@app.post("/transcribe/youtube")
+async def transcribe_youtube(
+    url: str,
+    model: str = "small",
+    language: str = "Russian",
+    output_format: str = "txt",
+    initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.",
+    task: str = "transcribe",
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    if not url:
+        raise HTTPException(status_code=400, detail="URL не указан")
+
+    valid_models = ["tiny", "base", "small", "medium", "large"]
+    if model not in valid_models:
+        model = "small"
+
+    task_id = str(uuid.uuid4())
+    active_tasks[task_id] = True
+    progress_store[task_id] = {
+        "status": "downloading",
+        "current": 0,
+        "total": 1,
+        "current_file": "",
+        "current_file_progress": 0,
+        "message": "Загрузка аудио с YouTube...",
+        "whisper_logs": [],
+        "last_log": ""
+    }
+
+    background_tasks.add_task(
+        process_youtube_async,
+        url, task_id, model, language, output_format, initial_prompt, task
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content={"task_id": task_id, "message": "Загрузка и обработка начаты"}
+    )
+
+
+async def process_youtube_async(
+    url: str,
+    task_id: str,
+    model: str = "small",
+    language: str = "Russian",
+    output_format: str = "txt",
+    initial_prompt: str = "",
+    task: str = "transcribe"
+):
+    tmp_dir = None
+    try:
+        import threading
+        import queue
+
+        active_tasks[task_id] = True
+        task_start_time = datetime.now()
+
+        progress_store[task_id] = {
+            "status": "downloading",
+            "current": 0,
+            "total": 1,
+            "current_file": "",
+            "current_file_progress": 0,
+            "message": "Загрузка аудио с YouTube...",
+            "whisper_logs": [],
+            "last_log": "",
+            "start_time": task_start_time.timestamp(),
+            "elapsed_seconds": 0,
+            "estimated_remaining_seconds": None
+        }
+
+        tmp_dir = tempfile.mkdtemp()
+
+        # Find yt-dlp binary
+        yt_dlp_bin = shutil.which("yt-dlp")
+        if not yt_dlp_bin:
+            raise Exception("yt-dlp не найден. Установите: brew install yt-dlp")
+
+        yt_cmd = [
+            yt_dlp_bin,
+            "--cookies-from-browser", "chrome",
+            "-x", "--audio-format", "mp3", "--audio-quality", "192K",
+            "--no-playlist",
+            "-o", os.path.join(tmp_dir, "%(title)s.%(ext)s"),
+            "--print", "after_move:filepath",
+            url
+        ]
+
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'
+
+        process = subprocess.Popen(
+            yt_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=0,
+            env=env
+        )
+
+        log_queue = queue.Queue()
+
+        def read_stream(stream, stream_name):
+            try:
+                while True:
+                    line = stream.readline()
+                    if not line:
+                        break
+                    line = line.rstrip()
+                    if line:
+                        log_queue.put((stream_name, line))
+            except Exception as e:
+                logger.error(f"Ошибка чтения {stream_name}: {str(e)}")
+            finally:
+                try:
+                    stream.close()
+                except:
+                    pass
+
+        stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, 'stdout'), daemon=True)
+        stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, 'stderr'), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        downloaded_file = None
+
+        while process.poll() is None:
+            if not active_tasks.get(task_id, True):
+                process.terminate()
+                process.wait()
+                progress_store[task_id]["status"] = "cancelled"
+                progress_store[task_id]["message"] = "Обработка остановлена пользователем"
+                return
+
+            while not log_queue.empty():
+                try:
+                    stream_type, line = log_queue.get_nowait()
+
+                    if stream_type == 'stdout' and line.strip().endswith('.mp3'):
+                        downloaded_file = line.strip()
+
+                    if stream_type == 'stderr':
+                        percent_match = re.search(r'(\d+(?:\.\d+)?)%', line)
+                        if percent_match:
+                            pct = float(percent_match.group(1))
+                            progress_store[task_id]["current_file_progress"] = min(int(pct), 99)
+
+                        if '[download]' in line:
+                            progress_store[task_id]["message"] = f"Загрузка: {line.split('[download]')[-1].strip()}"
+                        elif '[ExtractAudio]' in line:
+                            progress_store[task_id]["message"] = "Извлечение аудио..."
+                            progress_store[task_id]["current_file_progress"] = 100
+
+                    progress_store[task_id]["last_log"] = f"[{stream_type.upper()}] {line}"
+                except queue.Empty:
+                    break
+
+            total_elapsed = (datetime.now() - task_start_time).total_seconds()
+            progress_store[task_id]["elapsed_seconds"] = int(total_elapsed)
+            await asyncio.sleep(0.3)
+
+        process.wait()
+        stdout_thread.join(timeout=2)
+        stderr_thread.join(timeout=2)
+
+        # Drain remaining output
+        while not log_queue.empty():
+            try:
+                stream_type, line = log_queue.get_nowait()
+                if stream_type == 'stdout' and line.strip().endswith('.mp3'):
+                    downloaded_file = line.strip()
+            except queue.Empty:
+                break
+
+        if process.returncode != 0:
+            raise Exception("Ошибка загрузки с YouTube. Проверьте ссылку.")
+
+        # Find downloaded mp3 if not captured via --print
+        if not downloaded_file or not os.path.exists(downloaded_file):
+            for f in os.listdir(tmp_dir):
+                if f.endswith('.mp3'):
+                    downloaded_file = os.path.join(tmp_dir, f)
+                    break
+
+        if not downloaded_file or not os.path.exists(downloaded_file):
+            raise Exception("Не удалось найти загруженный аудио файл")
+
+        # Extract title from filename
+        video_title = Path(downloaded_file).stem
+        safe_title = re.sub(r'[<>:"/\\|?*]', '_', video_title)[:100]
+
+        progress_store[task_id]["message"] = f"Транскрибация: {safe_title}"
+        progress_store[task_id]["current_file_progress"] = 0
+
+        file_paths = [{"tmp_path": downloaded_file, "name": f"{safe_title}.mp3"}]
+
+        # Delegate to the audio processing function — it manages progress_store and active_tasks
+        await process_audio_files_async(
+            file_paths, task_id, model, language, output_format, initial_prompt, task
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка YouTube: {str(e)}")
+        progress_store[task_id] = {
+            "status": "error",
+            "current": 0,
+            "total": 1,
+            "current_file": "",
+            "current_file_progress": 0,
+            "message": f"Ошибка: {str(e)}"
+        }
+        if task_id in active_tasks:
+            del active_tasks[task_id]
+    finally:
+        if tmp_dir and os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @app.get("/telegram/folders/{folder_name}/messages")
 async def export_telegram_messages(folder_name: str):
     folder_path = TELEGRAM_DIR / folder_name
@@ -863,6 +1365,24 @@ async def export_telegram_messages(folder_name: str):
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Ошибка экспорта: {str(e)}")
+
+@app.post("/rename-output")
+async def rename_output(old_name: str, new_name: str):
+    old_path = DOWNLOADS_DIR / old_name
+    new_path = DOWNLOADS_DIR / new_name
+    if not old_path.exists():
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    if new_path.exists():
+        raise HTTPException(status_code=400, detail="Файл с таким именем уже существует")
+    old_path.rename(new_path)
+    return JSONResponse(status_code=200, content={"message": f"Файл переименован в {new_name}"})
+
+
+@app.get("/open-downloads")
+async def open_downloads():
+    subprocess.Popen(["open", str(DOWNLOADS_DIR)])
+    return JSONResponse(status_code=200, content={"message": "Папка открыта"})
+
 
 @app.get("/")
 async def root():
