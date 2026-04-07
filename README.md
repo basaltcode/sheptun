@@ -43,7 +43,7 @@ Open source приложение для локальной и бесплатно
 |-----------|--------|
 | macOS (Apple Silicon) | [Sheptun-1.0.0-arm64.dmg](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0-arm64.dmg) |
 | macOS (Intel) | [Sheptun-1.0.0.dmg](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0.dmg) |
-| Windows | [Sheptun-Setup-1.0.0.exe](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-Setup-1.0.0.exe) |
+| Windows | [Sheptun.Setup.1.0.0.exe](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun.Setup.1.0.0.exe) |
 | Linux | [Sheptun-1.0.0.AppImage](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0.AppImage) |
 
 Все версии доступны на странице [Releases](https://github.com/basaltcode/sheptun/releases).
