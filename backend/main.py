@@ -36,10 +36,93 @@ DOWNLOADS_DIR = Path.home() / "Downloads"
 TELEGRAM_DIR = Path(os.environ.get("TELEGRAM_DIR", str(Path.home() / "Downloads" / "Telegram Desktop")))
 ALLOWED_EXTENSIONS = {".ogg", ".mp3", ".wav", ".m4a"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
-WHISPER_PYTHON = Path(sys.executable)
+
+# Whisper venv for bundled mode
+WHISPER_VENV_DIR = Path.home() / ".sheptun" / "whisper-venv"
+whisper_setup_done = False
+
+def get_whisper_python() -> Path:
+    """Get the Python executable that has whisper installed."""
+    # If running from source (not bundled), use current Python
+    if not getattr(sys, 'frozen', False):
+        return Path(sys.executable)
+
+    # Bundled mode: use whisper venv
+    if sys.platform == 'win32':
+        return WHISPER_VENV_DIR / "Scripts" / "python.exe"
+    return WHISPER_VENV_DIR / "bin" / "python"
+
+
+def ensure_whisper_installed():
+    """Create venv and install whisper if needed (bundled mode only)."""
+    global whisper_setup_done
+    if whisper_setup_done:
+        return
+    if not getattr(sys, 'frozen', False):
+        whisper_setup_done = True
+        return
+
+    whisper_python = get_whisper_python()
+    marker = WHISPER_VENV_DIR / ".whisper-installed"
+
+    if marker.exists() and whisper_python.exists():
+        whisper_setup_done = True
+        return
+
+    logger.info("Setting up whisper environment...")
+
+    # Find system Python
+    python_candidates = ['python3', 'python'] if sys.platform != 'win32' else ['python', 'python3', 'py']
+    system_python = None
+    for candidate in python_candidates:
+        try:
+            result = subprocess.run(
+                [candidate, '--version'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and 'Python 3' in (result.stdout + result.stderr):
+                system_python = candidate
+                break
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+
+    if not system_python:
+        raise RuntimeError(
+            "Python 3 не найден в системе. Установите Python 3.8+ для работы Whisper.\n"
+            "macOS: brew install python3\n"
+            "Windows: https://python.org/downloads\n"
+            "Linux: sudo apt install python3 python3-venv"
+        )
+
+    # Create venv
+    WHISPER_VENV_DIR.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [system_python, '-m', 'venv', str(WHISPER_VENV_DIR)],
+        check=True, capture_output=True
+    )
+
+    # Install whisper
+    pip = WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin") / "pip"
+    subprocess.run(
+        [str(pip), 'install', 'openai-whisper'],
+        check=True, capture_output=True
+    )
+
+    marker.write_text("installed")
+    whisper_setup_done = True
+    logger.info("Whisper environment ready")
+
 
 progress_store: Dict[str, Dict] = {}
 active_tasks: Dict[str, bool] = {}
+
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        ensure_whisper_installed()
+    except Exception as e:
+        logger.error(f"Failed to setup whisper: {e}")
 
 async def process_audio_files_async(
     file_paths: List[dict],
@@ -107,7 +190,7 @@ async def process_audio_files_async(
             })
 
             whisper_cmd = [
-                str(WHISPER_PYTHON), "-m", "whisper",
+                str(get_whisper_python()), "-m", "whisper",
                 str(tmp_path),
                 "--model", model,
                 "--task", task,
@@ -619,7 +702,7 @@ async def process_telegram_files_async(
             logger.info(f"Обработка файла {idx}/{total_files}: {file_path.name} (0%)")
             
             whisper_cmd = [
-                str(WHISPER_PYTHON), "-m", "whisper",
+                str(get_whisper_python()), "-m", "whisper",
                 str(file_path),
                 "--model", model,
                 "--output_format", output_format,
@@ -978,7 +1061,7 @@ async def transcribe_video(
         task = "translate"
     
     whisper_cmd = [
-        str(WHISPER_PYTHON), "-m", "whisper",
+        str(get_whisper_python()), "-m", "whisper",
         "--model", model,
         "--task", task,
         "--output_format", output_format,

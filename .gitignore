@@ -12,3 +12,4 @@ release/
 backend/dist/
 backend/build/
 *.spec
+Archive.zip
