@@ -37,20 +37,36 @@ Open source приложение для локальной и бесплатно
   - macOS: `brew install yt-dlp`
   - Другие: `pip install yt-dlp`
 
+## Скачать
+
+| Платформа | Ссылка |
+|-----------|--------|
+| macOS (Apple Silicon) | [Sheptun-1.0.0-arm64.dmg](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0-arm64.dmg) |
+| macOS (Intel) | [Sheptun-1.0.0.dmg](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0.dmg) |
+| Windows | [Sheptun-Setup-1.0.0.exe](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-Setup-1.0.0.exe) |
+| Linux | [Sheptun-1.0.0.AppImage](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0.AppImage) |
+
+Все версии доступны на странице [Releases](https://github.com/basaltcode/sheptun/releases).
+
 ## Установка
 
 ### macOS
 
-1. Скачайте файл `Sheptun-X.X.X.dmg` (x64) или `Sheptun-X.X.X-arm64.dmg` (Apple Silicon) из [Releases](../../releases)
-2. Откройте `.dmg` и перетащите приложение в папку `Applications`
+1. Скачайте `.dmg` файл по ссылке выше
+2. Откройте его и перетащите приложение в папку `Applications`
 3. При первом запуске: правый клик → "Открыть" (приложение не подписано)
 4. При первом запуске приложение автоматически создаст Python-окружение и установит зависимости
 
 ### Windows
 
-1. Скачайте и запустите `Sheptun Setup X.X.X.exe` из [Releases](../../releases)
+1. Скачайте `.exe` файл по ссылке выше
 2. Следуйте шагам установщика
 3. При первом запуске приложение автоматически установит Python-зависимости
+
+### Linux
+
+1. Скачайте `.AppImage` файл по ссылке выше
+2. `chmod +x Sheptun-1.0.0.AppImage && ./Sheptun-1.0.0.AppImage`
 
 ## Использование
 
