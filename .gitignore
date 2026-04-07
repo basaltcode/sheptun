@@ -9,3 +9,6 @@ release/
 *.dmg
 *.exe
 *.AppImage
+backend/dist/
+backend/build/
+*.spec

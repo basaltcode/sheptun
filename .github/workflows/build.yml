@@ -16,27 +16,43 @@ jobs:
         include:
           - os: macos-latest
             arch: arm64
-            build_cmd: npx electron-builder --mac --arm64 --publish never
+            electron_cmd: npx electron-builder --mac --arm64 --publish never
           - os: macos-14
             arch: x64
-            build_cmd: npx electron-builder --mac --x64 --publish never
+            electron_cmd: npx electron-builder --mac --x64 --publish never
           - os: windows-latest
             arch: x64
-            build_cmd: npx electron-builder --win --publish never
+            electron_cmd: npx electron-builder --win --publish never
           - os: ubuntu-latest
             arch: x64
-            build_cmd: npx electron-builder --linux --publish never
+            electron_cmd: npx electron-builder --linux --publish never
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Install Python dependencies
+        run: |
+          pip install pyinstaller
+          pip install -r backend/requirements.txt
+
+      - name: Build backend with PyInstaller
+        run: python backend/build.py
+
+      - name: Verify backend binary
+        run: ls -la backend/dist/sheptun-backend/
+        shell: bash
+
+      - name: Install Node dependencies
         run: |
           npm install
           cd frontend && npm install
@@ -45,7 +61,7 @@ jobs:
         run: cd frontend && npx vite build
 
       - name: Build Electron
-        run: ${{ matrix.build_cmd }}
+        run: ${{ matrix.electron_cmd }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

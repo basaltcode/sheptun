@@ -1,6 +1,6 @@
-appId: com.whisper.transcription
+appId: com.basaltcode.sheptun
 productName: Sheptun
-copyright: Copyright 2024
+copyright: Copyright 2024 Basalt Code
 
 directories:
   output: release
@@ -11,11 +11,10 @@ files:
   - package.json
 
 extraResources:
-  - from: backend/
+  - from: backend/dist/sheptun-backend/
     to: backend/
     filter:
-      - "**/*.py"
-      - "requirements.txt"
+      - "**/*"
 
 mac:
   category: public.app-category.productivity
