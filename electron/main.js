@@ -9,6 +9,7 @@ const { autoUpdater } = require('electron-updater');
 let mainWindow;
 let backendProcess;
 let backendPort;
+let backendLogs = [];
 
 const isDev = !app.isPackaged;
 
@@ -28,6 +29,7 @@ function createWindow() {
     width: 1200,
     height: 800,
     title: 'Sheptun',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -35,18 +37,22 @@ function createWindow() {
     },
   });
 
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
-  }
-
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
-function waitForBackend(port, timeoutMs = 60000) {
+function loadApp() {
+  if (!mainWindow) return;
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
+  }
+  mainWindow.show();
+}
+
+function waitForBackend(port, timeoutMs = 180000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     function check() {
@@ -135,24 +141,38 @@ async function startBackend() {
   }
 
   backendProcess.stdout.on('data', (data) => {
-    console.log(`[backend] ${data}`);
+    const line = data.toString();
+    console.log(`[backend] ${line}`);
+    backendLogs.push(line);
+    if (backendLogs.length > 100) backendLogs.shift();
   });
 
   backendProcess.stderr.on('data', (data) => {
-    console.error(`[backend] ${data}`);
+    const line = data.toString();
+    console.error(`[backend] ${line}`);
+    backendLogs.push(line);
+    if (backendLogs.length > 100) backendLogs.shift();
   });
 
   backendProcess.on('close', (code) => {
     console.log(`Backend exited with code ${code}`);
+    if (code !== 0 && code !== null && mainWindow) {
+      const lastLogs = backendLogs.slice(-20).join('\n');
+      dialog.showErrorBox(
+        'Бэкенд завершился с ошибкой',
+        `Код: ${code}\n\nЛоги:\n${lastLogs}`
+      );
+    }
     backendProcess = null;
   });
 
   try {
     await waitForBackend(backendPort);
   } catch (err) {
+    const lastLogs = backendLogs.slice(-20).join('\n');
     dialog.showErrorBox(
       'Ошибка запуска',
-      'Не удалось запустить серверную часть приложения.\nПопробуйте перезапустить.'
+      `Не удалось запустить серверную часть приложения.\n\nЛоги:\n${lastLogs}`
     );
     app.quit();
   }
@@ -170,6 +190,10 @@ function killBackend() {
 
 ipcMain.handle('get-backend-url', () => {
   return `http://127.0.0.1:${backendPort}`;
+});
+
+ipcMain.handle('get-backend-logs', () => {
+  return backendLogs.slice(-50).join('\n');
 });
 
 ipcMain.handle('get-app-version', () => {
@@ -212,13 +236,7 @@ function setupAutoUpdater() {
 app.whenReady().then(async () => {
   createWindow();
   await startBackend();
-
-  if (mainWindow) {
-    mainWindow.setTitle('Sheptun');
-    if (!isDev) {
-      mainWindow.reload();
-    }
-  }
+  loadApp();
 
   if (!isDev) {
     setupAutoUpdater();

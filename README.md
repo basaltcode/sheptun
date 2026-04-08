@@ -8,6 +8,8 @@ Open source приложение для локальной и бесплатно
 
 Превращает речь в текст — из локальных файлов, видео с YouTube или голосовых сообщений Telegram.
 
+Название Sheptun — от Whisper (англ. «шёпот»). Sheptun — тот, кто шепчет шёпотом (Whisper).
+
 От студии [Basalt Code](https://basalt-code.ru).
 
 ## Возможности
@@ -29,28 +31,13 @@ Open source приложение для локальной и бесплатно
 
 ## Требования
 
-- **Python 3.8+**
-  - macOS: `brew install python3`
-  - Windows: [python.org/downloads](https://python.org/downloads) (отметьте "Add to PATH")
-  - Linux: `sudo apt install python3 python3-venv`
-- **ffmpeg** — для обработки аудио/видео
-  - macOS: `brew install ffmpeg`
-  - Windows: [ffmpeg.org](https://ffmpeg.org/download.html)
-  - Linux: `sudo apt install ffmpeg`
-- **yt-dlp** (для YouTube)
-  - macOS: `brew install yt-dlp`
-  - Другие: `pip install yt-dlp`
+Никаких! Все зависимости (Python, Whisper, ffmpeg, yt-dlp) устанавливаются автоматически при первом запуске. Просто скачайте и запустите.
+
+> **Первый запуск** займёт несколько минут — приложение скачает и настроит необходимые компоненты.
 
 ## Скачать
 
-| Платформа | Ссылка |
-|-----------|--------|
-| macOS (Apple Silicon) | [Sheptun-1.0.0-arm64.dmg](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0-arm64.dmg) |
-| macOS (Intel) | [Sheptun-1.0.0.dmg](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0.dmg) |
-| Windows | [Sheptun.Setup.1.0.0.exe](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun.Setup.1.0.0.exe) |
-| Linux | [Sheptun-1.0.0.AppImage](https://github.com/basaltcode/sheptun/releases/download/v1.0.0/Sheptun-1.0.0.AppImage) |
-
-Все версии доступны на странице [Releases](https://github.com/basaltcode/sheptun/releases).
+Скачайте последнюю версию для вашей платформы на странице [Releases](https://github.com/basaltcode/sheptun/releases/latest).
 
 ## Установка
 
@@ -70,7 +57,7 @@ Open source приложение для локальной и бесплатно
 ### Linux
 
 1. Скачайте `.AppImage` файл по ссылке выше
-2. `chmod +x Sheptun-1.0.0.AppImage && ./Sheptun-1.0.0.AppImage`
+2. `chmod +x Sheptun-1.1.0.AppImage && ./Sheptun-1.1.0.AppImage`
 
 ## Использование
 
@@ -86,11 +73,15 @@ Open source приложение для локальной и бесплатно
 
 ### YouTube
 
-Для работы с YouTube нужен установленный `yt-dlp`. При первом использовании macOS попросит доступ к кукам Chrome (Keychain) — это нужно, чтобы YouTube не блокировал загрузку.
+`yt-dlp` устанавливается автоматически. При первом использовании macOS попросит доступ к кукам Chrome (Keychain) — это нужно, чтобы YouTube не блокировал загрузку.
 
 ## Сборка из исходников
 
 ### Разработка
+
+Для сборки из исходников потребуется:
+- **Python 3.8+** — для запуска бэкенда
+- **Node.js 20+** — для сборки фронтенда и Electron
 
 ```bash
 # Установить зависимости

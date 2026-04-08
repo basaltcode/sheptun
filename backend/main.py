@@ -12,6 +12,7 @@ import asyncio
 import json
 import uuid
 import re
+import threading
 from datetime import datetime
 from mutagen import File as MutagenFile
 import shutil
@@ -40,6 +41,7 @@ ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
 # Whisper venv for bundled mode
 WHISPER_VENV_DIR = Path.home() / ".sheptun" / "whisper-venv"
 whisper_setup_done = False
+whisper_setup_status = {"stage": "pending", "message": ""}
 
 def get_whisper_python() -> Path:
     """Get the Python executable that has whisper installed."""
@@ -96,11 +98,12 @@ def _find_python() -> str | None:
 
 def ensure_whisper_installed():
     """Create venv and install whisper if needed (bundled mode only)."""
-    global whisper_setup_done
+    global whisper_setup_done, whisper_setup_status
     if whisper_setup_done:
         return
     if not getattr(sys, 'frozen', False):
         whisper_setup_done = True
+        whisper_setup_status = {"stage": "ready", "message": ""}
         return
 
     whisper_python = get_whisper_python()
@@ -108,13 +111,16 @@ def ensure_whisper_installed():
 
     if marker.exists() and whisper_python.exists():
         whisper_setup_done = True
+        whisper_setup_status = {"stage": "ready", "message": ""}
         return
 
     logger.info("Setting up whisper environment...")
+    whisper_setup_status = {"stage": "installing", "message": "Поиск Python..."}
 
     # Find Python: embedded first, then system
     system_python = _find_python()
     if not system_python:
+        whisper_setup_status = {"stage": "error", "message": "Python 3 не найден"}
         raise RuntimeError(
             "Python 3 не найден. Переустановите приложение или установите Python 3.8+.\n"
             "macOS: brew install python3\n"
@@ -123,6 +129,7 @@ def ensure_whisper_installed():
         )
 
     # Create venv
+    whisper_setup_status = {"stage": "installing", "message": "Создание окружения..."}
     WHISPER_VENV_DIR.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [system_python, '-m', 'venv', str(WHISPER_VENV_DIR)],
@@ -130,6 +137,7 @@ def ensure_whisper_installed():
     )
 
     # Install whisper, yt-dlp, and imageio-ffmpeg (bundles ffmpeg binary)
+    whisper_setup_status = {"stage": "installing", "message": "Установка зависимостей (это может занять несколько минут)..."}
     pip = WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin") / "pip"
     subprocess.run(
         [str(pip), 'install', 'openai-whisper', 'yt-dlp', 'imageio-ffmpeg'],
@@ -137,6 +145,7 @@ def ensure_whisper_installed():
     )
 
     # Create ffmpeg symlink in venv bin so it's on PATH
+    whisper_setup_status = {"stage": "installing", "message": "Настройка ffmpeg..."}
     venv_bin_dir = WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin")
     ffmpeg_link = venv_bin_dir / ("ffmpeg.exe" if sys.platform == 'win32' else "ffmpeg")
     if not ffmpeg_link.exists():
@@ -158,6 +167,7 @@ def ensure_whisper_installed():
 
     marker.write_text("installed")
     whisper_setup_done = True
+    whisper_setup_status = {"stage": "ready", "message": ""}
     logger.info("Whisper + yt-dlp + ffmpeg environment ready")
 
 
@@ -191,10 +201,12 @@ active_tasks: Dict[str, bool] = {}
 
 @app.on_event("startup")
 async def startup_event():
-    try:
-        ensure_whisper_installed()
-    except Exception as e:
-        logger.error(f"Failed to setup whisper: {e}")
+    def _setup():
+        try:
+            ensure_whisper_installed()
+        except Exception as e:
+            logger.error(f"Failed to setup whisper: {e}")
+    threading.Thread(target=_setup, daemon=True).start()
 
 async def process_audio_files_async(
     file_paths: List[dict],
@@ -1533,6 +1545,11 @@ async def rename_output(old_name: str, new_name: str):
 async def open_downloads():
     subprocess.Popen(["open", str(DOWNLOADS_DIR)])
     return JSONResponse(status_code=200, content={"message": "Папка открыта"})
+
+
+@app.get("/setup-status")
+async def setup_status():
+    return whisper_setup_status
 
 
 @app.get("/")

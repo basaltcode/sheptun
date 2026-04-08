@@ -36,6 +36,14 @@
       </div>
     </div>
     
+    <div v-if="setupStatus.stage === 'installing'" class="setup-banner">
+      <div class="setup-spinner"></div>
+      {{ setupStatus.message || 'Подготовка к работе...' }}
+    </div>
+    <div v-else-if="setupStatus.stage === 'error'" class="setup-banner setup-banner--error">
+      Ошибка настройки: {{ setupStatus.message }}
+    </div>
+
     <div class="tabs">
       <button 
         @click="activeTab = 'audio'" 
@@ -146,7 +154,7 @@
         <div class="buttons-group">
           <button
             @click="transcribe"
-            :disabled="selectedFiles.length === 0 || loading"
+            :disabled="selectedFiles.length === 0 || loading || !setupReady"
             class="transcribe-btn primary-btn"
           >
             {{ loading ? 'Распознавание...' : '🎵 Распознать аудио' }}
@@ -245,7 +253,7 @@
         <div class="buttons-group">
           <button
             @click="transcribeVideo"
-            :disabled="selectedVideoFiles.length === 0 || loading"
+            :disabled="selectedVideoFiles.length === 0 || loading || !setupReady"
             class="transcribe-btn success-btn"
           >
             {{ loading ? 'Обработка...' : '🎬 Создать субтитры для видео' }}
@@ -330,7 +338,7 @@
         <div class="buttons-group">
           <button
             @click="transcribeYoutube"
-            :disabled="!youtubeUrl || loading"
+            :disabled="!youtubeUrl || loading || !setupReady"
             class="transcribe-btn youtube-btn"
           >
             {{ loading ? 'Обработка...' : 'Транскрибировать' }}
@@ -481,7 +489,7 @@
             <button
               v-if="!loading"
               @click="transcribeTelegram"
-              :disabled="telegramFiles.length === 0"
+              :disabled="telegramFiles.length === 0 || !setupReady"
               class="transcribe-btn primary-btn"
             >
               🎵 Распознать все файлы
@@ -632,6 +640,7 @@ const updateAvailable = ref(false)
 const updateDownloaded = ref(false)
 const updateVersion = ref('')
 const showAbout = ref(false)
+const setupStatus = ref({ stage: 'pending', message: '' })
 
 const installUpdate = () => {
   if (window.electronAPI?.installUpdate) {
@@ -1266,6 +1275,8 @@ const shortenFileName = (fileName) => {
   return fileName.substring(0, 30) + '...' + fileName.substring(fileName.length - 17)
 }
 
+const setupReady = computed(() => setupStatus.value.stage === 'ready')
+
 const progressPercent = computed(() => {
   if (progress.value.total === 0) return 0
   return Math.round((progress.value.current / progress.value.total) * 100)
@@ -1284,6 +1295,29 @@ onMounted(async () => {
   if (window.electronAPI?.getAppVersion) {
     appVersion.value = await window.electronAPI.getAppVersion()
   }
+  // Poll setup status until ready
+  let setupRetries = 0
+  const pollSetup = async () => {
+    try {
+      const url = await apiUrl('/setup-status')
+      const res = await fetch(url)
+      const data = await res.json()
+      setupStatus.value = data
+      setupRetries = 0
+      if (data.stage !== 'ready') {
+        setTimeout(pollSetup, 2000)
+      }
+    } catch {
+      setupRetries++
+      if (setupRetries > 30) {
+        setupStatus.value = { stage: 'error', message: 'Нет связи с сервером. Попробуйте перезапустить приложение.' }
+      } else {
+        setTimeout(pollSetup, 2000)
+      }
+    }
+  }
+  pollSetup()
+
   if (window.electronAPI?.onUpdateAvailable) {
     window.electronAPI.onUpdateAvailable((version) => {
       updateAvailable.value = true
@@ -2181,6 +2215,37 @@ input[type="file"]:disabled {
 .update-banner--downloading {
   background: #fff3cd;
   color: #856404;
+}
+
+.setup-banner {
+  background: #e8f0fe;
+  color: #1a56db;
+  padding: 0.8rem 1rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.setup-banner--error {
+  background: #fde8e8;
+  color: #c81e1e;
+}
+
+.setup-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #1a56db;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .update-btn {
