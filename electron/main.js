@@ -4,6 +4,7 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const { findFreePort } = require('./portFinder');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 let backendProcess;
@@ -125,7 +126,11 @@ async function startBackend() {
       '--port', String(backendPort),
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, SHEPTUN_PORT: String(backendPort) },
+      env: {
+        ...process.env,
+        SHEPTUN_PORT: String(backendPort),
+        SHEPTUN_RESOURCES_PATH: process.resourcesPath,
+      },
     });
   }
 
@@ -167,6 +172,43 @@ ipcMain.handle('get-backend-url', () => {
   return `http://127.0.0.1:${backendPort}`;
 });
 
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
+ipcMain.handle('check-for-updates', () => {
+  if (!isDev) {
+    autoUpdater.checkForUpdates();
+  }
+});
+
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall();
+});
+
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('update-available', info.version);
+    }
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    if (mainWindow) {
+      mainWindow.webContents.send('update-downloaded', info.version);
+    }
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('AutoUpdater error:', err);
+  });
+
+  autoUpdater.checkForUpdates();
+}
+
 app.whenReady().then(async () => {
   createWindow();
   await startBackend();
@@ -176,6 +218,10 @@ app.whenReady().then(async () => {
     if (!isDev) {
       mainWindow.reload();
     }
+  }
+
+  if (!isDev) {
+    setupAutoUpdater();
   }
 });
 

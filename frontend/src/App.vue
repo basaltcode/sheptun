@@ -3,6 +3,37 @@
     <div class="app-header">
       <img src="/logo.png" alt="Sheptun" class="app-logo" />
       <h1>Sheptun</h1>
+      <button class="about-btn" @click="showAbout = true" title="О программе">v{{ appVersion }}</button>
+    </div>
+
+    <div v-if="updateDownloaded" class="update-banner">
+      Доступна новая версия {{ updateVersion }}
+      <button class="update-btn" @click="installUpdate()">Обновить</button>
+    </div>
+    <div v-else-if="updateAvailable" class="update-banner update-banner--downloading">
+      Загружается обновление {{ updateVersion }}...
+    </div>
+
+    <div v-if="showAbout" class="about-overlay" @click.self="showAbout = false">
+      <div class="about-dialog">
+        <img src="/logo.png" alt="Sheptun" class="about-logo" />
+        <h2>Sheptun</h2>
+        <p class="about-version">Версия {{ appVersion }}</p>
+        <p class="about-description">Транскрибация аудио и видео с помощью OpenAI Whisper</p>
+        <div class="about-update-section">
+          <div v-if="updateDownloaded">
+            Доступна версия {{ updateVersion }}
+            <button class="update-btn" @click="installUpdate()">Установить и перезапустить</button>
+          </div>
+          <div v-else-if="updateAvailable">
+            Загружается версия {{ updateVersion }}...
+          </div>
+          <div v-else>
+            <button class="check-update-btn" @click="checkForUpdates()">Проверить обновления</button>
+          </div>
+        </div>
+        <button class="about-close-btn" @click="showAbout = false">Закрыть</button>
+      </div>
     </div>
     
     <div class="tabs">
@@ -318,7 +349,17 @@
     <div v-if="activeTab === 'telegram'" class="tab-content">
       <div class="section-card" style="margin-bottom: 1.5rem;">
         <h3 class="section-title">Импорт из Telegram</h3>
-        <p class="section-description">Транскрибация голосовых сообщений из экспорта Telegram Desktop. Экспортируйте чат через Telegram Desktop, папка ChatExport появится в Downloads — выберите её ниже.</p>
+        <div class="section-description">
+          <p><strong>Как это работает:</strong></p>
+          <ol class="instruction-steps">
+            <li>Откройте <strong>Telegram Desktop</strong>, выберите нужный чат</li>
+            <li>Нажмите <strong>⋮ → Экспорт истории чата</strong></li>
+            <li>В настройках экспорта отметьте <strong>«Голосовые сообщения»</strong> и нажмите <strong>«Экспортировать»</strong></li>
+            <li>Папка <code>ChatExport_*</code> появится в <strong>Downloads / Telegram Desktop</strong></li>
+            <li>Нажмите <strong>«Загрузить папки»</strong> ниже — приложение автоматически найдёт экспорт и покажет аудиофайлы для распознавания</li>
+          </ol>
+          <p style="margin-top: 0.5rem; color: var(--text-secondary, #888);">Или скачайте отдельный аудиофайл и добавьте его через вкладку <strong>«Аудио»</strong>.</p>
+        </div>
       </div>
       <div v-if="!selectedTelegramFolder" class="telegram-section">
         <button
@@ -585,6 +626,24 @@ const progress = ref({ current: 0, total: 0, currentFile: '', currentFileProgres
 const startTime = ref(null)
 const elapsedTime = ref(0)
 const estimatedRemaining = ref(null)
+
+const appVersion = ref('')
+const updateAvailable = ref(false)
+const updateDownloaded = ref(false)
+const updateVersion = ref('')
+const showAbout = ref(false)
+
+const installUpdate = () => {
+  if (window.electronAPI?.installUpdate) {
+    window.electronAPI.installUpdate()
+  }
+}
+
+const checkForUpdates = () => {
+  if (window.electronAPI?.checkForUpdates) {
+    window.electronAPI.checkForUpdates()
+  }
+}
 
 const telegramFolders = ref([])
 const selectedTelegramFolder = ref(null)
@@ -1214,13 +1273,29 @@ const progressPercent = computed(() => {
 
 let timerInterval = null
 
-onMounted(() => {
+onMounted(async () => {
   timerInterval = setInterval(() => {
     if (loading.value && startTime.value) {
       const now = Date.now() / 1000
       elapsedTime.value = Math.floor(now - startTime.value)
     }
   }, 1000)
+
+  if (window.electronAPI?.getAppVersion) {
+    appVersion.value = await window.electronAPI.getAppVersion()
+  }
+  if (window.electronAPI?.onUpdateAvailable) {
+    window.electronAPI.onUpdateAvailable((version) => {
+      updateAvailable.value = true
+      updateVersion.value = version
+    })
+  }
+  if (window.electronAPI?.onUpdateDownloaded) {
+    window.electronAPI.onUpdateDownloaded((version) => {
+      updateDownloaded.value = true
+      updateVersion.value = version
+    })
+  }
 })
 
 onUnmounted(() => {
@@ -1279,6 +1354,7 @@ body {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1.5rem;
+  position: relative;
 }
 
 .app-logo {
@@ -1694,6 +1770,30 @@ input[type="file"]:disabled {
   font-style: italic;
 }
 
+.instruction-steps {
+  margin: 0.5rem 0 0 1.2rem;
+  padding: 0;
+  font-style: normal;
+  line-height: 1.8;
+}
+
+.instruction-steps li {
+  margin-bottom: 0.2rem;
+}
+
+.instruction-steps code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.82rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .instruction-steps code {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
 .settings-form {
   margin-top: 1rem;
   margin-bottom: 1rem;
@@ -2043,5 +2143,138 @@ input[type="file"]:disabled {
   font-size: 0.85rem;
   color: #004085;
   text-align: left;
+}
+
+.about-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.75rem;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.about-btn:hover {
+  border-color: #007bff;
+  color: #007bff;
+}
+
+.update-banner {
+  background: #d4edda;
+  color: #155724;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.update-banner--downloading {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.update-btn {
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.update-btn:hover {
+  background: #218838;
+}
+
+.about-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.about-dialog {
+  background: white;
+  border-radius: 16px;
+  padding: 2rem;
+  text-align: center;
+  max-width: 360px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.about-logo {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 0.5rem;
+}
+
+.about-dialog h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1.4rem;
+}
+
+.about-version {
+  color: #888;
+  font-size: 0.9rem;
+  margin: 0 0 0.8rem;
+}
+
+.about-description {
+  color: #555;
+  font-size: 0.85rem;
+  margin: 0 0 1.2rem;
+}
+
+.about-update-section {
+  margin-bottom: 1.2rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.check-update-btn {
+  background: none;
+  border: 1px solid #007bff;
+  color: #007bff;
+  border-radius: 6px;
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.check-update-btn:hover {
+  background: #007bff;
+  color: white;
+}
+
+.about-close-btn {
+  background: #f0f0f0;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 1.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: #333;
+  transition: background 0.2s;
+}
+
+.about-close-btn:hover {
+  background: #e0e0e0;
 }
 </style>

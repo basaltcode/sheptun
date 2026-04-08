@@ -53,6 +53,47 @@ def get_whisper_python() -> Path:
     return WHISPER_VENV_DIR / "bin" / "python"
 
 
+def _find_embedded_python() -> str | None:
+    """Find Python bundled with the app in resources/python/."""
+    if not getattr(sys, 'frozen', False):
+        return None
+    # PyInstaller: sys._MEIPASS is the temp dir, but resources are next to the app
+    # Electron puts extraResources at process.resourcesPath which is passed via env
+    resources_dir = os.environ.get('SHEPTUN_RESOURCES_PATH', '')
+    if not resources_dir:
+        # Fallback: relative to the binary location
+        resources_dir = str(Path(sys.executable).parent.parent)
+    if sys.platform == 'win32':
+        candidate = os.path.join(resources_dir, 'python', 'python.exe')
+    else:
+        candidate = os.path.join(resources_dir, 'python', 'bin', 'python3')
+    if os.path.isfile(candidate):
+        logger.info(f"Found embedded Python: {candidate}")
+        return candidate
+    return None
+
+
+def _find_system_python() -> str | None:
+    """Find Python 3 on the system PATH."""
+    candidates = ['python3', 'python'] if sys.platform != 'win32' else ['python', 'python3', 'py']
+    for candidate in candidates:
+        try:
+            result = subprocess.run(
+                [candidate, '--version'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and 'Python 3' in (result.stdout + result.stderr):
+                return candidate
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return None
+
+
+def _find_python() -> str | None:
+    """Find Python: embedded first, then system."""
+    return _find_embedded_python() or _find_system_python()
+
+
 def ensure_whisper_installed():
     """Create venv and install whisper if needed (bundled mode only)."""
     global whisper_setup_done
@@ -63,7 +104,7 @@ def ensure_whisper_installed():
         return
 
     whisper_python = get_whisper_python()
-    marker = WHISPER_VENV_DIR / ".whisper-installed"
+    marker = WHISPER_VENV_DIR / ".deps-v3-installed"
 
     if marker.exists() and whisper_python.exists():
         whisper_setup_done = True
@@ -71,24 +112,11 @@ def ensure_whisper_installed():
 
     logger.info("Setting up whisper environment...")
 
-    # Find system Python
-    python_candidates = ['python3', 'python'] if sys.platform != 'win32' else ['python', 'python3', 'py']
-    system_python = None
-    for candidate in python_candidates:
-        try:
-            result = subprocess.run(
-                [candidate, '--version'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and 'Python 3' in (result.stdout + result.stderr):
-                system_python = candidate
-                break
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            continue
-
+    # Find Python: embedded first, then system
+    system_python = _find_python()
     if not system_python:
         raise RuntimeError(
-            "Python 3 не найден в системе. Установите Python 3.8+ для работы Whisper.\n"
+            "Python 3 не найден. Переустановите приложение или установите Python 3.8+.\n"
             "macOS: brew install python3\n"
             "Windows: https://python.org/downloads\n"
             "Linux: sudo apt install python3 python3-venv"
@@ -101,16 +129,60 @@ def ensure_whisper_installed():
         check=True, capture_output=True
     )
 
-    # Install whisper
+    # Install whisper, yt-dlp, and imageio-ffmpeg (bundles ffmpeg binary)
     pip = WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin") / "pip"
     subprocess.run(
-        [str(pip), 'install', 'openai-whisper'],
+        [str(pip), 'install', 'openai-whisper', 'yt-dlp', 'imageio-ffmpeg'],
         check=True, capture_output=True
     )
 
+    # Create ffmpeg symlink in venv bin so it's on PATH
+    venv_bin_dir = WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin")
+    ffmpeg_link = venv_bin_dir / ("ffmpeg.exe" if sys.platform == 'win32' else "ffmpeg")
+    if not ffmpeg_link.exists():
+        try:
+            whisper_python = get_whisper_python()
+            result = subprocess.run(
+                [str(whisper_python), '-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'],
+                capture_output=True, text=True
+            )
+            ffmpeg_real = result.stdout.strip()
+            if ffmpeg_real and Path(ffmpeg_real).exists():
+                if sys.platform == 'win32':
+                    shutil.copy2(ffmpeg_real, str(ffmpeg_link))
+                else:
+                    ffmpeg_link.symlink_to(ffmpeg_real)
+                logger.info(f"ffmpeg linked: {ffmpeg_link} -> {ffmpeg_real}")
+        except Exception as e:
+            logger.warning(f"Could not link ffmpeg from imageio-ffmpeg: {e}")
+
     marker.write_text("installed")
     whisper_setup_done = True
-    logger.info("Whisper environment ready")
+    logger.info("Whisper + yt-dlp + ffmpeg environment ready")
+
+
+def get_env_with_deps() -> dict:
+    """Return env with venv bin dir prepended to PATH (for ffmpeg, yt-dlp access)."""
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
+    if getattr(sys, 'frozen', False):
+        venv_bin = str(WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin"))
+        env['PATH'] = venv_bin + os.pathsep + env.get('PATH', '')
+    return env
+
+
+def get_yt_dlp_bin() -> str:
+    """Get yt-dlp binary path: check venv first, then system PATH."""
+    if sys.platform == 'win32':
+        venv_bin = WHISPER_VENV_DIR / "Scripts" / "yt-dlp.exe"
+    else:
+        venv_bin = WHISPER_VENV_DIR / "bin" / "yt-dlp"
+    if venv_bin.exists():
+        return str(venv_bin)
+    system_bin = shutil.which("yt-dlp")
+    if system_bin:
+        return system_bin
+    raise Exception("yt-dlp не найден. Перезапустите приложение для автоматической установки.")
 
 
 progress_store: Dict[str, Dict] = {}
@@ -204,8 +276,7 @@ async def process_audio_files_async(
             if initial_prompt:
                 whisper_cmd.extend(["--initial_prompt", initial_prompt])
 
-            env = os.environ.copy()
-            env['PYTHONUNBUFFERED'] = '1'
+            env = get_env_with_deps()
 
             process = subprocess.Popen(
                 whisper_cmd,
@@ -719,9 +790,8 @@ async def process_telegram_files_async(
             import threading
             import queue
             
-            env = os.environ.copy()
-            env['PYTHONUNBUFFERED'] = '1'
-            
+            env = get_env_with_deps()
+
             process = subprocess.Popen(
                 whisper_cmd,
                 stdout=subprocess.PIPE,
@@ -1087,12 +1157,13 @@ async def transcribe_video(
                 temp_files.append(tmp_path)
             
             cmd = whisper_cmd + [tmp_path]
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=3600
+                timeout=3600,
+                env=get_env_with_deps()
             )
             
             if result.returncode != 0:
@@ -1194,10 +1265,8 @@ async def process_youtube_async(
 
         tmp_dir = tempfile.mkdtemp()
 
-        # Find yt-dlp binary
-        yt_dlp_bin = shutil.which("yt-dlp")
-        if not yt_dlp_bin:
-            raise Exception("yt-dlp не найден. Установите: brew install yt-dlp")
+        # Find yt-dlp binary (venv or system)
+        yt_dlp_bin = get_yt_dlp_bin()
 
         yt_cmd = [
             yt_dlp_bin,
@@ -1209,8 +1278,7 @@ async def process_youtube_async(
             url
         ]
 
-        env = os.environ.copy()
-        env['PYTHONUNBUFFERED'] = '1'
+        env = get_env_with_deps()
 
         process = subprocess.Popen(
             yt_cmd,

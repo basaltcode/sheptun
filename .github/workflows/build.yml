@@ -16,16 +16,20 @@ jobs:
         include:
           - os: macos-latest
             arch: arm64
-            electron_cmd: npx electron-builder --mac --arm64 --publish never
+            electron_cmd: npx electron-builder --mac --arm64 --publish always
+            python_url: https://github.com/indygreg/python-build-standalone/releases/download/20260408/cpython-3.11.15+20260408-aarch64-apple-darwin-install_only.tar.gz
           - os: macos-14
             arch: x64
-            electron_cmd: npx electron-builder --mac --x64 --publish never
+            electron_cmd: npx electron-builder --mac --x64 --publish always
+            python_url: https://github.com/indygreg/python-build-standalone/releases/download/20260408/cpython-3.11.15+20260408-x86_64-apple-darwin-install_only.tar.gz
           - os: windows-latest
             arch: x64
-            electron_cmd: npx electron-builder --win --publish never
+            electron_cmd: npx electron-builder --win --publish always
+            python_url: https://github.com/indygreg/python-build-standalone/releases/download/20260408/cpython-3.11.15+20260408-x86_64-pc-windows-msvc-install_only.tar.gz
           - os: ubuntu-latest
             arch: x64
-            electron_cmd: npx electron-builder --linux --publish never
+            electron_cmd: npx electron-builder --linux --publish always
+            python_url: https://github.com/indygreg/python-build-standalone/releases/download/20260408/cpython-3.11.15+20260408-x86_64-unknown-linux-gnu-install_only.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -53,6 +57,21 @@ jobs:
         run: ls -la backend/dist/sheptun-backend/
         shell: bash
 
+      - name: Download standalone Python for bundling
+        shell: bash
+        run: |
+          mkdir -p backend/dist
+          curl -L -o python-standalone.tar.gz "${{ matrix.python_url }}"
+          tar xzf python-standalone.tar.gz -C backend/dist/
+          rm python-standalone.tar.gz
+          ls -la backend/dist/python/
+          # Verify it works
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            backend/dist/python/python.exe --version
+          else
+            backend/dist/python/bin/python3 --version
+          fi
+
       - name: Install Node dependencies
         run: |
           npm install
@@ -63,6 +82,8 @@ jobs:
 
       - name: Build Electron
         run: ${{ matrix.electron_cmd }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -11,12 +11,18 @@
     "build": "npm run build:frontend && electron-builder",
     "build:mac": "npm run build:frontend && electron-builder --mac",
     "build:win": "npm run build:frontend && electron-builder --win",
-    "build:linux": "npm run build:frontend && electron-builder --linux"
+    "build:linux": "npm run build:frontend && electron-builder --linux",
+    "release:patch": "npm version patch && git push && git push --tags",
+    "release:minor": "npm version minor && git push && git push --tags",
+    "release:major": "npm version major && git push && git push --tags"
   },
   "devDependencies": {
+    "concurrently": "^9.0.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
-    "concurrently": "^9.0.0",
     "wait-on": "^8.0.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   }
 }

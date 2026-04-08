@@ -2,6 +2,11 @@ appId: com.basaltcode.sheptun
 productName: Sheptun
 copyright: Copyright 2024 Basalt Code
 
+publish:
+  provider: github
+  owner: basaltcode
+  repo: sheptun
+
 directories:
   output: release
 
@@ -15,11 +20,16 @@ extraResources:
     to: backend/
     filter:
       - "**/*"
+  - from: backend/dist/python/
+    to: python/
+    filter:
+      - "**/*"
 
 mac:
   category: public.app-category.productivity
   target:
     - dmg
+    - zip
 
 win:
   target:
