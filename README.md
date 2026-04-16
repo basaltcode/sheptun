@@ -12,6 +12,8 @@ Open source приложение для локальной и бесплатно
 
 От студии [Basalt Code](https://basalt-code.ru).
 
+> **Приложение всё ещё находится в бета-тесте — ваши отзывы нам помогут.** Если что-то работает не так или есть предложения, пожалуйста, откройте [issue](https://github.com/basaltcode/sheptun/issues).
+
 ## Возможности
 
 - **Аудио файлы** — транскрибация файлов OGG, MP3, WAV, M4A с компьютера
@@ -72,7 +74,7 @@ Open source приложение для локальной и бесплатно
 ### Linux
 
 1. Скачайте `.AppImage` файл по ссылке выше
-2. `chmod +x Sheptun-1.1.0.AppImage && ./Sheptun-1.1.0.AppImage`
+2. `chmod +x Sheptun-1.2.0.AppImage && ./Sheptun-1.2.0.AppImage`
 
 ## Использование
 

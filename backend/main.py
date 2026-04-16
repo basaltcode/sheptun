@@ -171,6 +171,24 @@ def ensure_whisper_installed():
     logger.info("Whisper + yt-dlp + ffmpeg environment ready")
 
 
+def update_yt_dlp():
+    """Update yt-dlp to the latest version (YouTube changes frequently)."""
+    if not getattr(sys, 'frozen', False):
+        return
+    try:
+        pip = WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin") / "pip"
+        if not pip.exists():
+            return
+        logger.info("Updating yt-dlp...")
+        subprocess.run(
+            [str(pip), 'install', '--upgrade', 'yt-dlp'],
+            capture_output=True, timeout=60
+        )
+        logger.info("yt-dlp updated")
+    except Exception as e:
+        logger.warning(f"Failed to update yt-dlp: {e}")
+
+
 def get_env_with_deps() -> dict:
     """Return env with venv bin dir prepended to PATH (for ffmpeg, yt-dlp access)."""
     env = os.environ.copy()
@@ -204,6 +222,7 @@ async def startup_event():
     def _setup():
         try:
             ensure_whisper_installed()
+            update_yt_dlp()
         except Exception as e:
             logger.error(f"Failed to setup whisper: {e}")
     threading.Thread(target=_setup, daemon=True).start()
@@ -290,14 +309,17 @@ async def process_audio_files_async(
 
             env = get_env_with_deps()
 
-            process = subprocess.Popen(
-                whisper_cmd,
+            popen_kwargs = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=0,
                 env=env
             )
+            if sys.platform == 'win32':
+                popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+
+            process = subprocess.Popen(whisper_cmd, **popen_kwargs)
 
             log_queue = queue.Queue()
 
@@ -804,17 +826,20 @@ async def process_telegram_files_async(
             
             env = get_env_with_deps()
 
-            process = subprocess.Popen(
-                whisper_cmd,
+            popen_kwargs2 = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=0,
                 env=env
             )
-            
+            if sys.platform == 'win32':
+                popen_kwargs2['creationflags'] = subprocess.CREATE_NO_WINDOW
+
+            process = subprocess.Popen(whisper_cmd, **popen_kwargs2)
+
             log_queue = queue.Queue()
-            
+
             def read_stream(stream, stream_name):
                 try:
                     while True:
@@ -1280,9 +1305,8 @@ async def process_youtube_async(
         # Find yt-dlp binary (venv or system)
         yt_dlp_bin = get_yt_dlp_bin()
 
-        yt_cmd = [
+        yt_base_cmd = [
             yt_dlp_bin,
-            "--cookies-from-browser", "chrome",
             "-x", "--audio-format", "mp3", "--audio-quality", "192K",
             "--no-playlist",
             "-o", os.path.join(tmp_dir, "%(title)s.%(ext)s"),
@@ -1292,91 +1316,143 @@ async def process_youtube_async(
 
         env = get_env_with_deps()
 
-        process = subprocess.Popen(
-            yt_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=0,
-            env=env
-        )
+        def run_yt_dlp(yt_cmd):
+            """Run yt-dlp and monitor progress. Returns (process, downloaded_file, stderr_lines)."""
+            nonlocal task_start_time
 
-        log_queue = queue.Queue()
+            popen_kwargs = dict(
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=0,
+                env=env
+            )
+            if sys.platform == 'win32':
+                popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
 
-        def read_stream(stream, stream_name):
-            try:
-                while True:
-                    line = stream.readline()
-                    if not line:
+            process = subprocess.Popen(yt_cmd, **popen_kwargs)
+
+            _log_queue = queue.Queue()
+            _stderr_lines = []
+
+            def read_stream(stream, stream_name):
+                try:
+                    while True:
+                        line = stream.readline()
+                        if not line:
+                            break
+                        line = line.rstrip()
+                        if line:
+                            _log_queue.put((stream_name, line))
+                except Exception as e:
+                    logger.error(f"Ошибка чтения {stream_name}: {str(e)}")
+                finally:
+                    try:
+                        stream.close()
+                    except:
+                        pass
+
+            stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, 'stdout'), daemon=True)
+            stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, 'stderr'), daemon=True)
+            stdout_thread.start()
+            stderr_thread.start()
+
+            _downloaded_file = None
+
+            return process, stdout_thread, stderr_thread, _log_queue, _stderr_lines, _downloaded_file
+
+        async def monitor_yt_dlp(process, stdout_thread, stderr_thread, _log_queue, _stderr_lines, _downloaded_file):
+            """Monitor yt-dlp process, return (downloaded_file, stderr_lines)."""
+            downloaded_file = _downloaded_file
+
+            while process.poll() is None:
+                if not active_tasks.get(task_id, True):
+                    process.terminate()
+                    process.wait()
+                    progress_store[task_id]["status"] = "cancelled"
+                    progress_store[task_id]["message"] = "Обработка остановлена пользователем"
+                    return None, _stderr_lines
+
+                while not _log_queue.empty():
+                    try:
+                        stream_type, line = _log_queue.get_nowait()
+
+                        if stream_type == 'stdout' and line.strip().endswith('.mp3'):
+                            downloaded_file = line.strip()
+
+                        if stream_type == 'stderr':
+                            _stderr_lines.append(line)
+                            percent_match = re.search(r'(\d+(?:\.\d+)?)%', line)
+                            if percent_match:
+                                pct = float(percent_match.group(1))
+                                progress_store[task_id]["current_file_progress"] = min(int(pct), 99)
+
+                            if '[download]' in line:
+                                progress_store[task_id]["message"] = f"Загрузка: {line.split('[download]')[-1].strip()}"
+                            elif '[ExtractAudio]' in line:
+                                progress_store[task_id]["message"] = "Извлечение аудио..."
+                                progress_store[task_id]["current_file_progress"] = 100
+
+                        progress_store[task_id]["last_log"] = f"[{stream_type.upper()}] {line}"
+                    except queue.Empty:
                         break
-                    line = line.rstrip()
-                    if line:
-                        log_queue.put((stream_name, line))
-            except Exception as e:
-                logger.error(f"Ошибка чтения {stream_name}: {str(e)}")
-            finally:
+
+                total_elapsed = (datetime.now() - task_start_time).total_seconds()
+                progress_store[task_id]["elapsed_seconds"] = int(total_elapsed)
+                await asyncio.sleep(0.3)
+
+            process.wait()
+            stdout_thread.join(timeout=2)
+            stderr_thread.join(timeout=2)
+
+            # Drain remaining output
+            while not _log_queue.empty():
                 try:
-                    stream.close()
-                except:
-                    pass
-
-        stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, 'stdout'), daemon=True)
-        stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, 'stderr'), daemon=True)
-        stdout_thread.start()
-        stderr_thread.start()
-
-        downloaded_file = None
-
-        while process.poll() is None:
-            if not active_tasks.get(task_id, True):
-                process.terminate()
-                process.wait()
-                progress_store[task_id]["status"] = "cancelled"
-                progress_store[task_id]["message"] = "Обработка остановлена пользователем"
-                return
-
-            while not log_queue.empty():
-                try:
-                    stream_type, line = log_queue.get_nowait()
-
+                    stream_type, line = _log_queue.get_nowait()
                     if stream_type == 'stdout' and line.strip().endswith('.mp3'):
                         downloaded_file = line.strip()
-
                     if stream_type == 'stderr':
-                        percent_match = re.search(r'(\d+(?:\.\d+)?)%', line)
-                        if percent_match:
-                            pct = float(percent_match.group(1))
-                            progress_store[task_id]["current_file_progress"] = min(int(pct), 99)
-
-                        if '[download]' in line:
-                            progress_store[task_id]["message"] = f"Загрузка: {line.split('[download]')[-1].strip()}"
-                        elif '[ExtractAudio]' in line:
-                            progress_store[task_id]["message"] = "Извлечение аудио..."
-                            progress_store[task_id]["current_file_progress"] = 100
-
-                    progress_store[task_id]["last_log"] = f"[{stream_type.upper()}] {line}"
+                        _stderr_lines.append(line)
                 except queue.Empty:
                     break
 
-            total_elapsed = (datetime.now() - task_start_time).total_seconds()
-            progress_store[task_id]["elapsed_seconds"] = int(total_elapsed)
-            await asyncio.sleep(0.3)
+            return downloaded_file, _stderr_lines
 
-        process.wait()
-        stdout_thread.join(timeout=2)
-        stderr_thread.join(timeout=2)
+        # Try without cookies first, then with cookies on failure
+        proc, sthread, ethread, lqueue, elines, dfile = run_yt_dlp(yt_base_cmd)
+        downloaded_file, stderr_lines = await monitor_yt_dlp(proc, sthread, ethread, lqueue, elines, dfile)
 
-        # Drain remaining output
-        while not log_queue.empty():
-            try:
-                stream_type, line = log_queue.get_nowait()
-                if stream_type == 'stdout' and line.strip().endswith('.mp3'):
-                    downloaded_file = line.strip()
-            except queue.Empty:
-                break
+        if downloaded_file is None and progress_store[task_id].get("status") == "cancelled":
+            return
 
-        if process.returncode != 0:
-            raise Exception("Ошибка загрузки с YouTube. Проверьте ссылку.")
+        if proc.returncode != 0:
+            # Retry with browser cookies
+            logger.info("yt-dlp failed without cookies, retrying with --cookies-from-browser chrome")
+            progress_store[task_id]["message"] = "Повторная попытка с cookies браузера..."
+            progress_store[task_id]["current_file_progress"] = 0
+
+            # Clean tmp_dir for retry
+            for f in os.listdir(tmp_dir):
+                os.remove(os.path.join(tmp_dir, f))
+
+            yt_cmd_cookies = [yt_dlp_bin, "--cookies-from-browser", "chrome"] + yt_base_cmd[1:]
+            proc2, sthread2, ethread2, lqueue2, elines2, dfile2 = run_yt_dlp(yt_cmd_cookies)
+            downloaded_file, stderr_lines2 = await monitor_yt_dlp(proc2, sthread2, ethread2, lqueue2, elines2, dfile2)
+
+            if downloaded_file is None and progress_store[task_id].get("status") == "cancelled":
+                return
+
+            if proc2.returncode != 0:
+                # Show last meaningful error lines from yt-dlp
+                all_errors = stderr_lines + stderr_lines2
+                error_details = [l for l in all_errors if 'ERROR' in l or 'error' in l.lower()]
+                if error_details:
+                    last_error = error_details[-1].strip()
+                    # Remove yt-dlp prefix like "ERROR: "
+                    last_error = re.sub(r'^ERROR:\s*', '', last_error)
+                    raise Exception(f"Ошибка загрузки с YouTube: {last_error}")
+                else:
+                    raise Exception("Ошибка загрузки с YouTube. Проверьте ссылку.")
 
         # Find downloaded mp3 if not captured via --print
         if not downloaded_file or not os.path.exists(downloaded_file):
@@ -1543,7 +1619,12 @@ async def rename_output(old_name: str, new_name: str):
 
 @app.get("/open-downloads")
 async def open_downloads():
-    subprocess.Popen(["open", str(DOWNLOADS_DIR)])
+    if sys.platform == "win32":
+        os.startfile(str(DOWNLOADS_DIR))
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(DOWNLOADS_DIR)])
+    else:
+        subprocess.Popen(["xdg-open", str(DOWNLOADS_DIR)])
     return JSONResponse(status_code=200, content={"message": "Папка открыта"})
 
 
