@@ -29,7 +29,19 @@
             Загружается версия {{ updateVersion }}...
           </div>
           <div v-else>
-            <button class="check-update-btn" @click="checkForUpdates()">Проверить обновления</button>
+            <button
+              class="check-update-btn"
+              @click="checkForUpdates()"
+              :disabled="updateCheckStatus === 'checking'"
+            >
+              {{ updateCheckStatus === 'checking' ? 'Проверяем...' : 'Проверить обновления' }}
+            </button>
+            <p
+              v-if="updateCheckMessage"
+              :class="['update-check-msg', 'update-check-msg--' + updateCheckStatus]"
+            >
+              {{ updateCheckMessage }}
+            </p>
           </div>
         </div>
         <button class="about-close-btn" @click="showAbout = false">Закрыть</button>
@@ -61,6 +73,10 @@
         @click="activeTab = 'youtube'"
         :class="['tab-btn', { active: activeTab === 'youtube' }]"
       >
+        <svg class="tab-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path fill="#FF0000" d="M23.498 6.186a3.017 3.017 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.017 3.017 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.017 3.017 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814Z"/>
+          <path fill="#FFFFFF" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568Z"/>
+        </svg>
         YouTube
       </button>
       <button
@@ -73,7 +89,11 @@
         @click="activeTab = 'telegram'"
         :class="['tab-btn', { active: activeTab === 'telegram' }]"
       >
-        Импорт из Telegram
+        <svg class="tab-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle cx="12" cy="12" r="12" fill="#229ED9"/>
+          <path fill="#FFFFFF" d="M5.43 11.78c3.5-1.53 5.83-2.53 7-3.02 3.33-1.39 4.03-1.63 4.48-1.64.1 0 .32.02.47.14.12.1.15.24.17.33.02.1.04.3.02.47-.18 1.92-.96 6.58-1.36 8.74-.17.91-.5 1.22-.83 1.25-.7.07-1.24-.46-1.92-.91-1.06-.7-1.66-1.13-2.7-1.81-1.2-.78-.42-1.21.26-1.91.18-.18 3.28-3.01 3.34-3.27.01-.03.01-.15-.06-.21-.07-.06-.17-.04-.25-.02-.1.02-1.72 1.09-4.84 3.21-.46.31-.87.47-1.24.46-.41-.01-1.2-.23-1.78-.42-.72-.23-1.29-.36-1.24-.76.03-.21.31-.42.85-.64Z"/>
+        </svg>
+        Telegram
       </button>
     </div>
     
@@ -364,7 +384,7 @@
       <div class="section-card">
         <h3 class="section-title">🎤 Запись</h3>
         <p class="section-description">
-          Запишите голос с микрофона, захватите системный звук (созвон, YouTube) или оба сразу. По окончании записи файл распознаётся Whisper и сохраняется в Downloads.
+          Запишите голос с микрофона, захватите системный звук (созвон, YouTube, любой звук с компьютера) или оба сразу. По окончании записи файл распознаётся Whisper и сохраняется в Downloads.
         </p>
         <div class="record-sources">
           <label class="checkbox-row">
@@ -759,6 +779,8 @@ const updateAvailable = ref(false)
 const updateDownloaded = ref(false)
 const updateVersion = ref('')
 const showAbout = ref(false)
+const updateCheckStatus = ref('idle')
+const updateCheckMessage = ref('')
 const setupStatus = ref({ stage: 'pending', message: '' })
 
 const installUpdate = async () => {
@@ -772,21 +794,34 @@ const installUpdate = async () => {
 }
 
 const checkForUpdates = async () => {
-  if (!isTauri()) return
+  if (!isTauri()) {
+    updateCheckStatus.value = 'error'
+    updateCheckMessage.value = 'Обновления работают только в десктоп-приложении'
+    return
+  }
+  updateCheckStatus.value = 'checking'
+  updateCheckMessage.value = ''
   try {
     const { check } = await import('@tauri-apps/plugin-updater')
     const update = await check()
     if (update?.available) {
       updateAvailable.value = true
       updateVersion.value = update.version
+      updateCheckStatus.value = 'available'
+      updateCheckMessage.value = `Доступна версия ${update.version} — начинаем загрузку...`
       await update.downloadAndInstall((event) => {
         if (event.event === 'Finished') {
           updateDownloaded.value = true
         }
       })
+    } else {
+      updateCheckStatus.value = 'uptodate'
+      updateCheckMessage.value = `У вас последняя версия ${appVersion.value}`
     }
   } catch (err) {
     console.error('checkForUpdates failed:', err)
+    updateCheckStatus.value = 'error'
+    updateCheckMessage.value = 'Не удалось проверить обновления — проверьте интернет и попробуйте позже'
   }
 }
 
@@ -1863,6 +1898,17 @@ h1 {
   border-bottom: 2px solid transparent;
   margin-bottom: -2px;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.tab-icon {
+  width: 1.1em;
+  height: 1.1em;
+  flex-shrink: 0;
+  vertical-align: middle;
 }
 
 .tab-btn:hover {
@@ -2839,5 +2885,22 @@ input[type="file"]:disabled {
   border-radius: 6px;
   resize: vertical;
   box-sizing: border-box;
+}
+
+.update-check-msg {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+.update-check-msg--uptodate {
+  color: #2e7d32;
+}
+
+.update-check-msg--available {
+  color: #1565c0;
+}
+
+.update-check-msg--error {
+  color: #c62828;
 }
 </style>
