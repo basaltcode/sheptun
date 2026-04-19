@@ -1,13 +1,13 @@
 {
   "name": "sheptun",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Desktop app for audio transcription using OpenAI Whisper",
   "private": true,
   "scripts": {
     "dev": "tauri dev",
     "dev:frontend": "cd frontend && npx vite",
     "build:frontend": "cd frontend && npx vite build",
-    "build:backend": "cd backend && ./venv/bin/python build.py",
+    "build:backend": "cd backend && python build.py",
     "build": "tauri build",
     "build:mac-arm": "tauri build --target aarch64-apple-darwin",
     "build:mac-x64": "tauri build --target x86_64-apple-darwin",
