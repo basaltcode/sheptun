@@ -64,6 +64,12 @@
         YouTube
       </button>
       <button
+        @click="activeTab = 'record'"
+        :class="['tab-btn', { active: activeTab === 'record' }]"
+      >
+        🎤 Запись
+      </button>
+      <button
         @click="activeTab = 'telegram'"
         :class="['tab-btn', { active: activeTab === 'telegram' }]"
       >
@@ -350,6 +356,117 @@
           >
             Остановить
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="activeTab === 'record'" class="tab-content">
+      <div class="section-card">
+        <h3 class="section-title">🎤 Запись</h3>
+        <p class="section-description">
+          Запишите голос с микрофона, захватите системный звук (созвон, YouTube) или оба сразу. По окончании записи файл распознаётся Whisper и сохраняется в Downloads.
+        </p>
+        <div class="record-sources">
+          <label class="checkbox-row">
+            <input
+              type="checkbox"
+              v-model="recordSources.mic"
+              :disabled="recordState !== 'idle' || loading"
+            />
+            <span>Микрофон</span>
+          </label>
+          <label class="checkbox-row">
+            <input
+              type="checkbox"
+              v-model="recordSources.system"
+              :disabled="recordState !== 'idle' || loading"
+            />
+            <span>Системный звук (созвон / YouTube)</span>
+          </label>
+        </div>
+        <p v-if="!recordSources.mic && !recordSources.system" class="record-hint">
+          Выберите хотя бы один источник звука.
+        </p>
+        <p v-if="recordSources.system" class="record-hint">
+          При записи системного звука появится системный диалог — выберите окно или вкладку и отметьте «Поделиться звуком».
+        </p>
+
+        <div class="record-controls">
+          <button
+            v-if="recordState === 'idle'"
+            @click="startRecording"
+            :disabled="(!recordSources.mic && !recordSources.system) || loading || !setupReady"
+            class="transcribe-btn record-btn"
+          >
+            ● Начать запись
+          </button>
+          <button
+            v-else-if="recordState === 'recording'"
+            @click="stopRecording"
+            class="stop-btn record-btn"
+          >
+            ■ Остановить запись ({{ formatElapsedTime(recordElapsed) }})
+          </button>
+        </div>
+
+        <p v-if="recordError" class="record-hint record-hint--error">{{ recordError }}</p>
+      </div>
+
+      <div class="section-card">
+        <h3 class="section-title">Настройки обработки</h3>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label for="model-select-record">Модель:</label>
+            <select id="model-select-record" v-model="whisperSettings.model" class="model-select" :disabled="recordState !== 'idle' || loading">
+              <option value="tiny">Tiny — 39 MB, самая быстрая, низкая точность</option>
+              <option value="base">Base — 74 MB, быстрая, средняя точность</option>
+              <option value="small">Small — 244 MB, средняя скорость, хорошая точность</option>
+              <option value="medium">Medium — 769 MB, медленная, высокая точность</option>
+              <option value="large">Large — 1.5 GB, очень медленная, максимальная точность</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="language-select-record">Язык:</label>
+            <select id="language-select-record" v-model="whisperSettings.language" class="model-select" :disabled="recordState !== 'idle' || loading">
+              <option value="Russian">Русский</option>
+              <option value="English">Английский</option>
+              <option value="Ukrainian">Украинский</option>
+              <option value="">Автоопределение</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="task-select-record">Задача:</label>
+            <select id="task-select-record" v-model="whisperSettings.task" class="model-select" :disabled="recordState !== 'idle' || loading">
+              <option value="transcribe">Транскрибация (speech-to-text)</option>
+              <option value="translate">Перевод (speech-to-English)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-item full-width">
+          <label for="initial-prompt-record">Начальный промпт:</label>
+          <textarea
+            id="initial-prompt-record"
+            v-model="whisperSettings.initialPrompt"
+            class="prompt-textarea"
+            placeholder="Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией."
+            :disabled="recordState !== 'idle' || loading"
+          ></textarea>
+        </div>
+      </div>
+
+      <div v-if="recordedText" class="section-card">
+        <h3 class="section-title">Распознанный текст</h3>
+        <textarea
+          v-model="recordedText"
+          class="record-output"
+          rows="10"
+        ></textarea>
+        <div class="buttons-group" style="margin-top: 0.75rem;">
+          <button @click="copyRecordedText" class="rename-btn">Копировать</button>
+          <button @click="clearRecordedText" class="rename-btn">Очистить</button>
         </div>
       </div>
     </div>
@@ -691,6 +808,19 @@ const whisperSettings = ref({
   initialPrompt: 'Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.',
   task: 'transcribe'
 })
+
+const recordSources = ref({ mic: true, system: false })
+const recordState = ref('idle')
+const recordError = ref('')
+const recordedText = ref('')
+const recordElapsed = ref(0)
+const mediaRecorderRef = ref(null)
+const recordedChunks = ref([])
+const activeStreams = ref([])
+const activeAudioContext = ref(null)
+const recordTimerId = ref(null)
+const recordStartedAt = ref(0)
+const recordMimeType = ref('')
 
 const handleFileSelect = (event) => {
   const files = Array.from(event.target.files)
@@ -1207,6 +1337,291 @@ const stopTranscription = async () => {
   } catch (error) {
     console.error('Ошибка остановки:', error)
   }
+}
+
+const pickRecorderMimeType = () => {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+    'audio/ogg;codecs=opus'
+  ]
+  if (typeof MediaRecorder === 'undefined') return ''
+  for (const type of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(type)) return type
+    } catch (_) {}
+  }
+  return ''
+}
+
+const mimeToExt = (mime) => {
+  if (!mime) return 'webm'
+  if (mime.includes('webm')) return 'webm'
+  if (mime.includes('mp4')) return 'mp4'
+  if (mime.includes('ogg')) return 'ogg'
+  return 'webm'
+}
+
+const releaseRecordingResources = () => {
+  if (recordTimerId.value) {
+    clearInterval(recordTimerId.value)
+    recordTimerId.value = null
+  }
+  for (const stream of activeStreams.value) {
+    try {
+      stream.getTracks().forEach(t => t.stop())
+    } catch (_) {}
+  }
+  activeStreams.value = []
+  if (activeAudioContext.value) {
+    try { activeAudioContext.value.close() } catch (_) {}
+    activeAudioContext.value = null
+  }
+  mediaRecorderRef.value = null
+}
+
+const buildMixedStream = async () => {
+  const streams = []
+  let systemVideoTrack = null
+
+  if (recordSources.value.system) {
+    const displayStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true
+    })
+    const audioTracks = displayStream.getAudioTracks()
+    if (audioTracks.length === 0) {
+      displayStream.getTracks().forEach(t => t.stop())
+      throw new Error('Не удалось получить системный звук. В диалоге шаринга отметьте «Поделиться звуком» (обычно работает при выборе вкладки браузера).')
+    }
+    systemVideoTrack = displayStream.getVideoTracks()[0]
+    if (systemVideoTrack) systemVideoTrack.stop()
+    streams.push(displayStream)
+  }
+
+  if (recordSources.value.mic) {
+    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    streams.push(micStream)
+  }
+
+  activeStreams.value = streams
+
+  if (streams.length === 1) {
+    return new MediaStream(streams[0].getAudioTracks())
+  }
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext
+  const ctx = new AudioCtx()
+  activeAudioContext.value = ctx
+  const dest = ctx.createMediaStreamDestination()
+  for (const stream of streams) {
+    if (stream.getAudioTracks().length === 0) continue
+    const source = ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()))
+    source.connect(dest)
+  }
+  return dest.stream
+}
+
+const startRecording = async () => {
+  if (recordState.value !== 'idle') return
+  if (!recordSources.value.mic && !recordSources.value.system) return
+
+  recordError.value = ''
+  recordedChunks.value = []
+  recordElapsed.value = 0
+
+  try {
+    const mixedStream = await buildMixedStream()
+    const mimeType = pickRecorderMimeType()
+    recordMimeType.value = mimeType
+    const recorder = mimeType
+      ? new MediaRecorder(mixedStream, { mimeType })
+      : new MediaRecorder(mixedStream)
+    mediaRecorderRef.value = recorder
+
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) recordedChunks.value.push(event.data)
+    }
+    recorder.onstop = async () => {
+      const chunks = recordedChunks.value
+      const blob = new Blob(chunks, { type: recordMimeType.value || 'audio/webm' })
+      releaseRecordingResources()
+      recordState.value = 'idle'
+      if (blob.size === 0) {
+        recordError.value = 'Запись пустая — ничего не отправлено.'
+        return
+      }
+      await transcribeRecordedBlob(blob)
+    }
+
+    recorder.start()
+    recordState.value = 'recording'
+    recordStartedAt.value = Date.now()
+    recordTimerId.value = setInterval(() => {
+      recordElapsed.value = Math.floor((Date.now() - recordStartedAt.value) / 1000)
+    }, 500)
+  } catch (err) {
+    console.error('startRecording failed:', err)
+    releaseRecordingResources()
+    recordState.value = 'idle'
+    if (err && err.name === 'NotAllowedError') {
+      recordError.value = 'Доступ к записи отклонён. Проверьте разрешения системы.'
+    } else {
+      recordError.value = err?.message || 'Не удалось начать запись.'
+    }
+  }
+}
+
+const stopRecording = () => {
+  const recorder = mediaRecorderRef.value
+  if (!recorder) {
+    releaseRecordingResources()
+    recordState.value = 'idle'
+    return
+  }
+  try {
+    if (recorder.state !== 'inactive') recorder.stop()
+  } catch (err) {
+    console.error('stopRecording failed:', err)
+    releaseRecordingResources()
+    recordState.value = 'idle'
+  }
+}
+
+const transcribeRecordedBlob = async (blob) => {
+  loading.value = true
+  message.value = ''
+  messageType.value = ''
+  progress.value = { current: 0, total: 0, currentFile: '', currentFileProgress: 0, message: '', status: '', whisperLogs: [], lastLog: '', elapsed_seconds: 0, estimated_remaining_seconds: null, start_time: null }
+  startTime.value = null
+  elapsedTime.value = 0
+  estimatedRemaining.value = null
+  currentTaskId.value = null
+  outputFileName.value = ''
+  outputFileNameOriginal.value = ''
+
+  if (eventSource.value) {
+    eventSource.value.close()
+    eventSource.value = null
+  }
+
+  const ext = mimeToExt(recordMimeType.value)
+  const ts = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const filename = `dictation-${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.${ext}`
+
+  const formData = new FormData()
+  formData.append('files', new File([blob], filename, { type: blob.type || `audio/${ext}` }))
+
+  try {
+    const params = new URLSearchParams({
+      model: whisperSettings.value.model,
+      language: whisperSettings.value.language || '',
+      output_format: 'txt',
+      initial_prompt: whisperSettings.value.initialPrompt,
+      task: whisperSettings.value.task
+    })
+    const response = await fetch(`${await apiUrl('/transcribe')}?${params.toString()}`, {
+      method: 'POST',
+      body: formData
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || 'Ошибка при запуске транскрибации')
+    }
+
+    const data = await response.json()
+    if (!data.task_id) throw new Error('Не получен task_id от сервера')
+
+    currentTaskId.value = data.task_id
+    eventSource.value = new EventSource(await apiUrl(`/progress/${data.task_id}`))
+
+    eventSource.value.onmessage = async (event) => {
+      try {
+        const progressData = JSON.parse(event.data)
+        progress.value = {
+          current: progressData.current || 0,
+          total: progressData.total || 0,
+          currentFile: progressData.current_file || '',
+          currentFileProgress: progressData.current_file_progress || 0,
+          modelDownloadProgress: progressData.model_download_progress,
+          message: progressData.message || '',
+          status: progressData.status || '',
+          whisperLogs: progressData.whisper_logs || [],
+          lastLog: progressData.last_log || '',
+          elapsed_seconds: progressData.elapsed_seconds || 0,
+          estimated_remaining_seconds: progressData.estimated_remaining_seconds || null,
+          start_time: progressData.start_time || null
+        }
+        if (progressData.start_time && !startTime.value) startTime.value = progressData.start_time
+        if (progressData.elapsed_seconds !== undefined) elapsedTime.value = progressData.elapsed_seconds
+        estimatedRemaining.value = progressData.estimated_remaining_seconds || null
+
+        if (progressData.status === 'completed') {
+          playCompletionSound()
+          message.value = progressData.message || 'Обработка завершена'
+          messageType.value = 'success'
+          outputFileName.value = progressData.output_file || ''
+          outputFileNameOriginal.value = progressData.output_file || ''
+          loading.value = false
+          if (eventSource.value) { eventSource.value.close(); eventSource.value = null }
+          currentTaskId.value = null
+          if (outputFileName.value) {
+            try {
+              const textResp = await fetch(`${await apiUrl('/read-output')}?name=${encodeURIComponent(outputFileName.value)}`)
+              if (textResp.ok) {
+                const textData = await textResp.json()
+                recordedText.value = textData.text || ''
+              }
+            } catch (readErr) {
+              console.error('read-output failed:', readErr)
+            }
+          }
+        } else if (progressData.status === 'error' || progressData.status === 'cancelled') {
+          message.value = progressData.message || (progressData.status === 'cancelled' ? 'Обработка остановлена' : 'Произошла ошибка')
+          messageType.value = progressData.status === 'cancelled' ? 'warning' : 'error'
+          loading.value = false
+          if (eventSource.value) { eventSource.value.close(); eventSource.value = null }
+          currentTaskId.value = null
+        }
+      } catch (parseError) {
+        console.error('Ошибка парсинга данных прогресса:', parseError)
+      }
+    }
+
+    eventSource.value.onerror = (error) => {
+      console.error('SSE connection error:', error)
+      if (eventSource.value) { eventSource.value.close(); eventSource.value = null }
+      if (progress.value.status !== 'completed' && progress.value.status !== 'error') {
+        message.value = 'Ошибка соединения с сервером'
+        messageType.value = 'error'
+        loading.value = false
+        currentTaskId.value = null
+      }
+    }
+  } catch (error) {
+    console.error('transcribeRecordedBlob failed:', error)
+    message.value = error.message || 'Ошибка соединения с сервером'
+    messageType.value = 'error'
+    loading.value = false
+    currentTaskId.value = null
+  }
+}
+
+const copyRecordedText = async () => {
+  if (!recordedText.value) return
+  try {
+    await navigator.clipboard.writeText(recordedText.value)
+  } catch (err) {
+    console.error('copyRecordedText failed:', err)
+  }
+}
+
+const clearRecordedText = () => {
+  recordedText.value = ''
 }
 
 const renameOutput = async () => {
@@ -2370,5 +2785,59 @@ input[type="file"]:disabled {
 
 .about-close-btn:hover {
   background: #e0e0e0;
+}
+
+.record-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.record-hint {
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.record-hint--error {
+  color: #c62828;
+}
+
+.record-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.record-btn {
+  min-width: 14rem;
+}
+
+.record-output {
+  width: 100%;
+  min-height: 12rem;
+  padding: 0.75rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  resize: vertical;
+  box-sizing: border-box;
 }
 </style>

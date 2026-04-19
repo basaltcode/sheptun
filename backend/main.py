@@ -35,7 +35,7 @@ app.add_middleware(
 
 DOWNLOADS_DIR = Path.home() / "Downloads"
 TELEGRAM_DIR = Path(os.environ.get("TELEGRAM_DIR", str(Path.home() / "Downloads" / "Telegram Desktop")))
-ALLOWED_EXTENSIONS = {".ogg", ".mp3", ".wav", ".m4a"}
+ALLOWED_EXTENSIONS = {".ogg", ".mp3", ".wav", ".m4a", ".webm", ".mp4"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
 
 # Whisper venv for bundled mode
@@ -1615,6 +1615,20 @@ async def rename_output(old_name: str, new_name: str):
         raise HTTPException(status_code=400, detail="Файл с таким именем уже существует")
     old_path.rename(new_path)
     return JSONResponse(status_code=200, content={"message": f"Файл переименован в {new_name}"})
+
+
+@app.get("/read-output")
+async def read_output(name: str):
+    path = DOWNLOADS_DIR / name
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    if path.resolve().parent != DOWNLOADS_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Некорректный путь")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Файл не в текстовом формате")
+    return JSONResponse(status_code=200, content={"text": text})
 
 
 @app.get("/open-downloads")
