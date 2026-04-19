@@ -1,28 +1,24 @@
 {
   "name": "sheptun",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "Desktop app for audio transcription using OpenAI Whisper",
-  "main": "electron/main.js",
+  "private": true,
   "scripts": {
-    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:electron\"",
+    "dev": "tauri dev",
     "dev:frontend": "cd frontend && npx vite",
-    "dev:electron": "wait-on http://localhost:5173 && electron .",
     "build:frontend": "cd frontend && npx vite build",
-    "build": "npm run build:frontend && electron-builder",
-    "build:mac": "npm run build:frontend && electron-builder --mac",
-    "build:win": "npm run build:frontend && electron-builder --win",
-    "build:linux": "npm run build:frontend && electron-builder --linux",
+    "build:backend": "cd backend && ./venv/bin/python build.py",
+    "build": "tauri build",
+    "build:mac-arm": "tauri build --target aarch64-apple-darwin",
+    "build:mac-x64": "tauri build --target x86_64-apple-darwin",
+    "build:win": "tauri build --target x86_64-pc-windows-msvc",
+    "build:linux": "tauri build --target x86_64-unknown-linux-gnu",
+    "tauri": "tauri",
     "release:patch": "npm version patch && git push && git push --tags",
     "release:minor": "npm version minor && git push && git push --tags",
     "release:major": "npm version major && git push && git push --tags"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0",
-    "wait-on": "^8.0.0"
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.3"
+    "@tauri-apps/cli": "^2"
   }
 }

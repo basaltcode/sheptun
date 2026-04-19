@@ -492,7 +492,7 @@
               :disabled="telegramFiles.length === 0 || !setupReady"
               class="transcribe-btn primary-btn"
             >
-              🎵 Распознать все файлы
+              🎵 Распознать все голосовые
             </button>
             <button
               v-if="!loading"
@@ -500,7 +500,7 @@
               :disabled="!selectedTelegramFolder"
               class="transcribe-btn info-btn"
             >
-              💬 Экспортировать сообщения
+              💬 Сохранить текст переписки
             </button>
             <button
               v-if="loading"
@@ -622,6 +622,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { apiUrl } from './api.js'
 
+const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
+
 const fileInput = ref(null)
 const videoInput = ref(null)
 const selectedFiles = ref([])
@@ -642,15 +644,32 @@ const updateVersion = ref('')
 const showAbout = ref(false)
 const setupStatus = ref({ stage: 'pending', message: '' })
 
-const installUpdate = () => {
-  if (window.electronAPI?.installUpdate) {
-    window.electronAPI.installUpdate()
+const installUpdate = async () => {
+  if (!isTauri()) return
+  try {
+    const { relaunch } = await import('@tauri-apps/plugin-process')
+    await relaunch()
+  } catch (err) {
+    console.error('installUpdate failed:', err)
   }
 }
 
-const checkForUpdates = () => {
-  if (window.electronAPI?.checkForUpdates) {
-    window.electronAPI.checkForUpdates()
+const checkForUpdates = async () => {
+  if (!isTauri()) return
+  try {
+    const { check } = await import('@tauri-apps/plugin-updater')
+    const update = await check()
+    if (update?.available) {
+      updateAvailable.value = true
+      updateVersion.value = update.version
+      await update.downloadAndInstall((event) => {
+        if (event.event === 'Finished') {
+          updateDownloaded.value = true
+        }
+      })
+    }
+  } catch (err) {
+    console.error('checkForUpdates failed:', err)
   }
 }
 
@@ -1292,8 +1311,13 @@ onMounted(async () => {
     }
   }, 1000)
 
-  if (window.electronAPI?.getAppVersion) {
-    appVersion.value = await window.electronAPI.getAppVersion()
+  if (isTauri()) {
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app')
+      appVersion.value = await getVersion()
+    } catch (err) {
+      console.error('getVersion failed:', err)
+    }
   }
   // Poll setup status until ready
   let setupRetries = 0
@@ -1318,17 +1342,22 @@ onMounted(async () => {
   }
   pollSetup()
 
-  if (window.electronAPI?.onUpdateAvailable) {
-    window.electronAPI.onUpdateAvailable((version) => {
-      updateAvailable.value = true
-      updateVersion.value = version
-    })
-  }
-  if (window.electronAPI?.onUpdateDownloaded) {
-    window.electronAPI.onUpdateDownloaded((version) => {
-      updateDownloaded.value = true
-      updateVersion.value = version
-    })
+  if (isTauri()) {
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater')
+      const update = await check()
+      if (update?.available) {
+        updateAvailable.value = true
+        updateVersion.value = update.version
+        update.downloadAndInstall((event) => {
+          if (event.event === 'Finished') {
+            updateDownloaded.value = true
+          }
+        }).catch((err) => console.error('auto update failed:', err))
+      }
+    } catch (err) {
+      console.error('check updates failed:', err)
+    }
   }
 })
 

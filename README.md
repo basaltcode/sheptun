@@ -51,6 +51,8 @@ Open source приложение для локальной и бесплатно
 2. Откройте его и перетащите приложение в папку `Applications`
 3. При первом запуске приложение автоматически создаст Python-окружение и установит зависимости
 
+> **Обновление с версии 1.x (Electron):** автообновление с Electron-версий на Tauri-версию 2.0+ не работает. Скачайте новый `.dmg` / `.exe` / `.AppImage` вручную со страницы Releases и установите поверх.
+>
 > **Важно:** приложение не подписано Apple Developer ID (это платная подписка $99/год, которой у проекта пока нет), поэтому macOS покажет предупреждение «Файл Sheptun.app не был открыт» / «Apple не удалось подтвердить, что файл не содержит вредоносного ПО».
 >
 > Это **не означает**, что приложение вредоносное — просто Apple не верифицировала его. Исходный код полностью открыт, можно проверить.
@@ -74,7 +76,7 @@ Open source приложение для локальной и бесплатно
 ### Linux
 
 1. Скачайте `.AppImage` файл по ссылке выше
-2. `chmod +x Sheptun-1.2.0.AppImage && ./Sheptun-1.2.0.AppImage`
+2. `chmod +x sheptun_2.0.0_amd64.AppImage && ./sheptun_2.0.0_amd64.AppImage`
 
 ## Использование
 
@@ -97,13 +99,20 @@ Open source приложение для локальной и бесплатно
 ### Разработка
 
 Для сборки из исходников потребуется:
+- **Rust** (stable, через [rustup](https://rustup.rs))
 - **Python 3.8+** — для запуска бэкенда
-- **Node.js 20+** — для сборки фронтенда и Electron
+- **Node.js 20+** — для сборки фронтенда
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`)
+- **Windows:** MSVC Build Tools, WebView2 (предустановлен в Windows 11)
+- **Linux:** `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`
 
 ```bash
 # Установить зависимости
 npm install
 cd frontend && npm install && cd ..
+
+# Подготовить venv для dev-режима
+cd backend && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt && cd ..
 
 # Запуск в режиме разработки
 npm run dev
@@ -112,17 +121,20 @@ npm run dev
 ### Сборка установщиков
 
 ```bash
-# macOS (.dmg)
-npm run build:mac
+# macOS — Apple Silicon (.dmg)
+npm run build:mac-arm
 
-# Windows (.exe) — требуется Windows или CI
+# macOS — Intel (.dmg)
+npm run build:mac-x64
+
+# Windows (.exe) — требуется Windows
 npm run build:win
 
 # Linux (.AppImage)
 npm run build:linux
 ```
 
-Собранные файлы появятся в папке `release/`.
+Собранные файлы появятся в `src-tauri/target/<triple>/release/bundle/`.
 
 ## Запуск в браузере без установки
 

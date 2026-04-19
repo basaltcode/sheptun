@@ -1,4 +1,6 @@
 #!/bin/bash
+# Browser-mode (no Tauri): run the Python backend + Vite dev server.
+# For the native desktop app in dev mode, use `npm run dev` instead.
 
 cd "$(dirname "$0")"
 

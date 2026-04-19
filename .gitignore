@@ -18,3 +18,9 @@ PLANS.md
 .env
 .env.*
 *.log
+
+# Tauri
+src-tauri/target/
+src-tauri/resources/backend/
+src-tauri/gen/
+*.sig
