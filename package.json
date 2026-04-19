@@ -7,7 +7,7 @@
     "dev": "tauri dev",
     "dev:frontend": "cd frontend && npx vite",
     "build:frontend": "cd frontend && npx vite build",
-    "build:backend": "cd backend && python build.py",
+    "build:backend": "cd backend && python3 build.py",
     "build": "tauri build",
     "build:mac-arm": "tauri build --target aarch64-apple-darwin",
     "build:mac-x64": "tauri build --target x86_64-apple-darwin",
