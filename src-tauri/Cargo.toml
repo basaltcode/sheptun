@@ -1,6 +1,6 @@
 [package]
 name = "sheptun"
-version = "2.1.0"
+version = "2.1.1"
 description = "Desktop app for audio transcription using OpenAI Whisper"
 authors = ["Basalt Code"]
 edition = "2021"
