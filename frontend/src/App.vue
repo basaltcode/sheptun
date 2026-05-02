@@ -384,38 +384,70 @@
       <div class="section-card">
         <h3 class="section-title">🎤 Запись</h3>
         <p class="section-description">
-          Запишите голос с микрофона, захватите системный звук (созвон, YouTube, любой звук с компьютера) или оба сразу. По окончании записи файл распознаётся Whisper и сохраняется в Downloads.
+          Запишите звук с одного или нескольких устройств ввода. Можно совмещать микрофон с виртуальным устройством для захвата системного звука. По окончании записи файл распознаётся Whisper и сохраняется в Downloads.
         </p>
+
         <div class="record-sources">
-          <label class="checkbox-row">
-            <input
-              type="checkbox"
-              v-model="recordSources.mic"
+          <div class="record-sources__header">
+            <label class="record-sources__label">Устройства ввода:</label>
+            <button
+              @click="refreshAudioInputDevices"
+              class="rename-btn"
               :disabled="recordState !== 'idle' || loading"
-            />
-            <span>Микрофон</span>
-          </label>
-          <label class="checkbox-row">
-            <input
-              type="checkbox"
-              v-model="recordSources.system"
+              type="button"
+            >
+              Обновить
+            </button>
+          </div>
+
+          <div v-if="!devicesPermissionGranted && audioInputDevices.every(d => !d.label)" class="record-hint">
+            Чтобы увидеть названия устройств, разрешите доступ к микрофону.
+            <button
+              @click="requestMicPermission"
+              class="rename-btn"
               :disabled="recordState !== 'idle' || loading"
-            />
-            <span>Системный звук (созвон / YouTube)</span>
-          </label>
+              type="button"
+              style="margin-left: 0.5rem;"
+            >
+              Разрешить доступ
+            </button>
+          </div>
+
+          <div v-if="audioInputDevices.length === 0 && devicesEnumerated" class="record-hint">
+            Устройства ввода не найдены.
+          </div>
+
+          <div v-if="audioInputDevices.length > 0" class="record-sources__list">
+            <label
+              v-for="(device, idx) in audioInputDevices"
+              :key="device.deviceId || idx"
+              class="checkbox-row"
+            >
+              <input
+                type="checkbox"
+                :value="device.deviceId"
+                v-model="selectedInputDeviceIds"
+                :disabled="recordState !== 'idle' || loading"
+              />
+              <span>{{ device.label || `Устройство ${idx + 1}` }}</span>
+            </label>
+          </div>
         </div>
-        <p v-if="!recordSources.mic && !recordSources.system" class="record-hint">
-          Выберите хотя бы один источник звука.
+
+        <p v-if="audioInputDevices.length > 0 && selectedInputDeviceIds.length === 0" class="record-hint">
+          Выберите хотя бы одно устройство.
         </p>
-        <p v-if="recordSources.system" class="record-hint">
-          При записи системного звука появится системный диалог — выберите окно или вкладку и отметьте «Поделиться звуком».
+        <p class="record-hint">
+          Для захвата системного звука (созвоны, YouTube) установите виртуальное аудио-устройство — оно появится в списке выше:
+          <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener">BlackHole</a> (macOS),
+          <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener">VB-Cable</a> (Windows).
         </p>
 
         <div class="record-controls">
           <button
             v-if="recordState === 'idle'"
             @click="startRecording"
-            :disabled="(!recordSources.mic && !recordSources.system) || loading || !setupReady"
+            :disabled="selectedInputDeviceIds.length === 0 || loading || !setupReady"
             class="transcribe-btn record-btn"
           >
             ● Начать запись
@@ -844,7 +876,10 @@ const whisperSettings = ref({
   task: 'transcribe'
 })
 
-const recordSources = ref({ mic: true, system: false })
+const audioInputDevices = ref([])
+const selectedInputDeviceIds = ref([])
+const devicesPermissionGranted = ref(false)
+const devicesEnumerated = ref(false)
 const recordState = ref('idle')
 const recordError = ref('')
 const recordedText = ref('')
@@ -856,6 +891,7 @@ const activeAudioContext = ref(null)
 const recordTimerId = ref(null)
 const recordStartedAt = ref(0)
 const recordMimeType = ref('')
+let deviceChangeHandler = null
 
 const handleFileSelect = (event) => {
   const files = Array.from(event.target.files)
@@ -875,16 +911,28 @@ const handleVideoSelect = (event) => {
 
 const transcribeVideo = async () => {
   if (selectedVideoFiles.value.length === 0) return
-  
+
   loading.value = true
   message.value = ''
   messageType.value = ''
-  
+  progress.value = { current: 0, total: 0, currentFile: '', currentFileProgress: 0, message: '', status: '', whisperLogs: [], lastLog: '', elapsed_seconds: 0, estimated_remaining_seconds: null, start_time: null }
+  startTime.value = null
+  elapsedTime.value = 0
+  estimatedRemaining.value = null
+  currentTaskId.value = null
+  outputFileName.value = ''
+  outputFileNameOriginal.value = ''
+
+  if (eventSource.value) {
+    eventSource.value.close()
+    eventSource.value = null
+  }
+
   const formData = new FormData()
   selectedVideoFiles.value.forEach(file => {
     formData.append('files', file)
   })
-  
+
   try {
     const params = new URLSearchParams({
       model: whisperSettings.value.model === 'small' ? 'medium' : whisperSettings.value.model,
@@ -896,21 +944,94 @@ const transcribeVideo = async () => {
       method: 'POST',
       body: formData
     })
-    
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.detail || 'Ошибка при запуске транскрибации')
+    }
+
     const data = await response.json()
-    
-    if (response.ok) {
-      message.value = data.message
-      messageType.value = 'success'
-    } else {
-      message.value = data.detail || 'Произошла ошибка'
-      messageType.value = 'error'
+
+    if (!data.task_id) {
+      throw new Error('Не получен task_id от сервера')
+    }
+
+    currentTaskId.value = data.task_id
+
+    eventSource.value = new EventSource(await apiUrl(`/progress/${data.task_id}`))
+
+    eventSource.value.onmessage = (event) => {
+      try {
+        const progressData = JSON.parse(event.data)
+        progress.value = {
+          current: progressData.current || 0,
+          total: progressData.total || 0,
+          currentFile: progressData.current_file || '',
+          currentFileProgress: progressData.current_file_progress || 0,
+          modelDownloadProgress: progressData.model_download_progress,
+          message: progressData.message || '',
+          status: progressData.status || '',
+          whisperLogs: progressData.whisper_logs || [],
+          lastLog: progressData.last_log || '',
+          elapsed_seconds: progressData.elapsed_seconds || 0,
+          estimated_remaining_seconds: progressData.estimated_remaining_seconds || null,
+          start_time: progressData.start_time || null
+        }
+
+        if (progressData.start_time && !startTime.value) {
+          startTime.value = progressData.start_time
+        }
+        if (progressData.elapsed_seconds !== undefined) {
+          elapsedTime.value = progressData.elapsed_seconds
+        }
+        estimatedRemaining.value = progressData.estimated_remaining_seconds || null
+
+        if (progressData.status === 'completed') {
+          playCompletionSound()
+          message.value = progressData.message || 'Обработка завершена'
+          messageType.value = 'success'
+          outputFileName.value = progressData.output_file || ''
+          outputFileNameOriginal.value = progressData.output_file || ''
+          loading.value = false
+          if (eventSource.value) {
+            eventSource.value.close()
+            eventSource.value = null
+          }
+          currentTaskId.value = null
+        } else if (progressData.status === 'error' || progressData.status === 'cancelled') {
+          message.value = progressData.message || (progressData.status === 'cancelled' ? 'Обработка остановлена' : 'Произошла ошибка')
+          messageType.value = progressData.status === 'cancelled' ? 'warning' : 'error'
+          loading.value = false
+          if (eventSource.value) {
+            eventSource.value.close()
+            eventSource.value = null
+          }
+          currentTaskId.value = null
+        }
+      } catch (parseError) {
+        console.error('Ошибка парсинга данных прогресса:', parseError)
+      }
+    }
+
+    eventSource.value.onerror = (error) => {
+      console.error('SSE connection error:', error)
+      if (eventSource.value) {
+        eventSource.value.close()
+        eventSource.value = null
+      }
+      if (progress.value.status !== 'completed' && progress.value.status !== 'error') {
+        message.value = 'Ошибка соединения с сервером'
+        messageType.value = 'error'
+        loading.value = false
+        currentTaskId.value = null
+      }
     }
   } catch (error) {
-    message.value = 'Ошибка соединения с сервером'
+    console.error('Ошибка при запуске транскрибации видео:', error)
+    message.value = error.message || 'Ошибка соединения с сервером'
     messageType.value = 'error'
-  } finally {
     loading.value = false
+    currentTaskId.value = null
   }
 }
 
@@ -1417,28 +1538,54 @@ const releaseRecordingResources = () => {
   mediaRecorderRef.value = null
 }
 
-const buildMixedStream = async () => {
-  const streams = []
-  let systemVideoTrack = null
+const refreshAudioInputDevices = async () => {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const inputs = devices.filter(d => d.kind === 'audioinput')
+    audioInputDevices.value = inputs
+    devicesEnumerated.value = true
+    if (inputs.some(d => d.label)) devicesPermissionGranted.value = true
 
-  if (recordSources.value.system) {
-    const displayStream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true
-    })
-    const audioTracks = displayStream.getAudioTracks()
-    if (audioTracks.length === 0) {
-      displayStream.getTracks().forEach(t => t.stop())
-      throw new Error('Не удалось получить системный звук. В диалоге шаринга отметьте «Поделиться звуком» (обычно работает при выборе вкладки браузера).')
+    const availableIds = new Set(inputs.map(d => d.deviceId))
+    selectedInputDeviceIds.value = selectedInputDeviceIds.value.filter(id => availableIds.has(id))
+
+    if (selectedInputDeviceIds.value.length === 0 && inputs.length > 0) {
+      const def = inputs.find(d => d.deviceId === 'default') || inputs[0]
+      selectedInputDeviceIds.value = [def.deviceId]
     }
-    systemVideoTrack = displayStream.getVideoTracks()[0]
-    if (systemVideoTrack) systemVideoTrack.stop()
-    streams.push(displayStream)
+  } catch (err) {
+    console.error('enumerateDevices failed:', err)
+  }
+}
+
+const requestMicPermission = async () => {
+  recordError.value = ''
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream.getTracks().forEach(t => t.stop())
+    devicesPermissionGranted.value = true
+    await refreshAudioInputDevices()
+  } catch (err) {
+    console.error('requestMicPermission failed:', err)
+    recordError.value = err?.name === 'NotAllowedError'
+      ? 'Доступ к микрофону отклонён. Проверьте разрешения системы.'
+      : (err?.message || 'Не удалось получить доступ к микрофону.')
+  }
+}
+
+const buildMixedStream = async () => {
+  const ids = selectedInputDeviceIds.value
+  if (!ids || ids.length === 0) {
+    throw new Error('Выберите хотя бы одно устройство ввода.')
   }
 
-  if (recordSources.value.mic) {
-    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    streams.push(micStream)
+  const streams = []
+  for (const id of ids) {
+    const constraints = id && id !== 'default'
+      ? { audio: { deviceId: { exact: id } } }
+      : { audio: true }
+    const stream = await navigator.mediaDevices.getUserMedia(constraints)
+    streams.push(stream)
   }
 
   activeStreams.value = streams
@@ -1461,7 +1608,7 @@ const buildMixedStream = async () => {
 
 const startRecording = async () => {
   if (recordState.value !== 'idle') return
-  if (!recordSources.value.mic && !recordSources.value.system) return
+  if (selectedInputDeviceIds.value.length === 0) return
 
   recordError.value = ''
   recordedChunks.value = []
@@ -1769,6 +1916,14 @@ onMounted(async () => {
       console.error('getVersion failed:', err)
     }
   }
+
+  if (navigator.mediaDevices?.enumerateDevices) {
+    await refreshAudioInputDevices()
+    if (navigator.mediaDevices.addEventListener) {
+      deviceChangeHandler = () => { refreshAudioInputDevices() }
+      navigator.mediaDevices.addEventListener('devicechange', deviceChangeHandler)
+    }
+  }
   // Poll setup status until ready
   let setupRetries = 0
   const pollSetup = async () => {
@@ -1814,6 +1969,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (timerInterval) {
     clearInterval(timerInterval)
+  }
+  if (deviceChangeHandler && navigator.mediaDevices?.removeEventListener) {
+    navigator.mediaDevices.removeEventListener('devicechange', deviceChangeHandler)
+    deviceChangeHandler = null
   }
 })
 
@@ -2838,6 +2997,29 @@ input[type="file"]:disabled {
   flex-direction: column;
   gap: 0.5rem;
   margin: 0.5rem 0 1rem;
+}
+
+.record-sources__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.record-sources__label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.record-sources__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e3e3e3;
+  border-radius: 6px;
+  background: #fafafa;
 }
 
 .checkbox-row {

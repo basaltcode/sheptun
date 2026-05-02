@@ -1154,81 +1154,56 @@ async def transcribe_video(
     model: str = "medium",
     language: str = "English",
     output_format: str = "srt",
-    task: str = "translate"
+    task: str = "translate",
+    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Файлы не выбраны")
-    
-    all_outputs = []
-    temp_files = []
-    
+
     valid_models = ["tiny", "base", "small", "medium", "large"]
     if model not in valid_models:
         model = "medium"
-    
+
     if task not in ["transcribe", "translate"]:
         task = "translate"
-    
-    whisper_cmd = [
-        str(get_whisper_python()), "-m", "whisper",
-        "--model", model,
-        "--task", task,
-        "--output_format", output_format,
-        "--output_dir", str(DOWNLOADS_DIR)
-    ]
-    
-    if language:
-        whisper_cmd.extend(["--language", language])
-    
-    try:
-        for file in files:
-            if not file.filename:
-                continue
-            
-            file_ext = Path(file.filename).suffix.lower()
-            if file_ext not in ALLOWED_VIDEO_EXTENSIONS:
-                continue
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
-                content = await file.read()
-                tmp_file.write(content)
-                tmp_path = tmp_file.name
-                temp_files.append(tmp_path)
-            
-            cmd = whisper_cmd + [tmp_path]
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=3600,
-                env=get_env_with_deps()
-            )
-            
-            if result.returncode != 0:
-                continue
-            
-            base_name = Path(file.filename).stem
-            output_file = DOWNLOADS_DIR / f"{base_name}.{output_format}"
-            
-            if output_file.exists():
-                all_outputs.append(str(output_file))
-        
-        if not all_outputs:
-            raise HTTPException(status_code=500, detail="Не удалось обработать файлы")
-        
-        return JSONResponse(
-            status_code=200,
-            content={"message": f"Готово. Файлы сохранены в Downloads: {', '.join([Path(f).name for f in all_outputs])}"}
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Таймаут транскрибации")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
-    finally:
-        for tmp_path in temp_files:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+    file_paths = []
+    for file in files:
+        if not file.filename:
+            continue
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext not in ALLOWED_VIDEO_EXTENSIONS:
+            continue
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            file_paths.append({"tmp_path": tmp_file.name, "name": file.filename})
+
+    if not file_paths:
+        raise HTTPException(status_code=400, detail="Нет подходящих файлов")
+
+    task_id = str(uuid.uuid4())
+    active_tasks[task_id] = True
+    progress_store[task_id] = {
+        "status": "starting",
+        "current": 0,
+        "total": len(file_paths),
+        "current_file": "",
+        "current_file_progress": 0,
+        "message": "Начало обработки...",
+        "whisper_logs": [],
+        "last_log": ""
+    }
+
+    background_tasks.add_task(
+        process_audio_files_async,
+        file_paths, task_id, model, language, output_format, "", task
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content={"task_id": task_id, "message": "Обработка начата"}
+    )
 
 @app.post("/transcribe/youtube")
 async def transcribe_youtube(

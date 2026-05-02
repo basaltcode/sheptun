@@ -31,13 +31,30 @@ fn venv_pip(venv: &Path) -> PathBuf {
 }
 
 fn find_system_python() -> Option<String> {
-    let candidates: &[&str] = if cfg!(windows) {
+    // openai-whisper==20231117 fails to build on Python >=3.13 (setup.py imports
+    // pkg_resources, which is no longer auto-injected). Prefer specific 3.9–3.12
+    // interpreters first; only fall back to generic names if their version checks out.
+    let pinned: &[&str] = &[
+        "python3.12",
+        "python3.11",
+        "python3.10",
+        "python3.9",
+        "/opt/homebrew/bin/python3.12",
+        "/opt/homebrew/bin/python3.11",
+        "/opt/homebrew/bin/python3.10",
+        "/opt/homebrew/bin/python3.9",
+        "/usr/local/bin/python3.12",
+        "/usr/local/bin/python3.11",
+        "/usr/local/bin/python3.10",
+        "/usr/local/bin/python3.9",
+    ];
+    let generic: &[&str] = if cfg!(windows) {
         &["python3", "python", "py"]
     } else {
         &["python3", "/usr/bin/python3", "/usr/local/bin/python3", "python"]
     };
 
-    for cmd in candidates {
+    for cmd in pinned.iter().chain(generic.iter()) {
         let output = Command::new(cmd).arg("--version").output();
         if let Ok(out) = output {
             if out.status.success() {
@@ -47,7 +64,7 @@ fn find_system_python() -> Option<String> {
                     String::from_utf8_lossy(&out.stderr)
                 );
                 if let Some((major, minor)) = parse_python_version(&text) {
-                    if major >= 3 && minor >= 8 {
+                    if major == 3 && (9..=12).contains(&minor) {
                         return Some(cmd.to_string());
                     }
                 }
