@@ -2175,23 +2175,20 @@ body {
   background-image: var(--bg-grad);
   background-attachment: fixed;
   color: var(--text);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
   min-height: 100vh;
-  padding: 1.5rem;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 .container {
-  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.005) 100%), var(--surface);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   padding: 1.5rem 1.75rem 2rem;
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.02) inset;
-  max-width: 920px;
+  border-radius: 0;
+  box-shadow: none;
+  max-width: 1100px;
   width: 100%;
+  margin: 0 auto;
   text-align: left;
   color: var(--text);
 }
