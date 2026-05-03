@@ -3,6 +3,10 @@
     <div class="app-header">
       <img src="/logo.png" alt="Sheptun" class="app-logo" />
       <h1>Sheptun</h1>
+      <label class="keep-awake-toggle" title="Не давать компьютеру уходить в сон, пока приложение открыто">
+        <input type="checkbox" v-model="keepAwake" @change="applyKeepAwake" />
+        <span>☕ Не спать</span>
+      </label>
       <button class="about-btn" @click="showAbout = true" title="О программе">v{{ appVersion }}</button>
     </div>
 
@@ -56,7 +60,7 @@
       Ошибка настройки: {{ setupStatus.message }}
     </div>
 
-    <div class="tabs">
+    <div v-if="!loading" class="tabs">
       <button 
         @click="activeTab = 'audio'" 
         :class="['tab-btn', { active: activeTab === 'audio' }]"
@@ -97,7 +101,7 @@
       </button>
     </div>
     
-    <div v-if="activeTab === 'audio'" class="tab-content">
+    <div v-if="activeTab === 'audio' && !loading" class="tab-content">
       <div class="section-card">
         <h3 class="section-title">📁 Аудио файлы</h3>
         <p class="section-description">Транскрибация аудио файлов с компьютера. Загрузите файлы в формате OGG, MP3, WAV или M4A — текст будет сохранён в папку Downloads.</p>
@@ -140,7 +144,7 @@
             <select id="language-select-audio" v-model="whisperSettings.language" class="model-select">
               <option value="Russian">Русский</option>
               <option value="English">Английский</option>
-              <option value="Ukrainian">Украинский</option>
+              <option value="Arabic">Арабский</option>
               <option value="">Автоопределение</option>
             </select>
           </div>
@@ -159,8 +163,25 @@
           <div class="setting-item">
             <label for="task-select-audio">Задача:</label>
             <select id="task-select-audio" v-model="whisperSettings.task" class="model-select">
-              <option value="transcribe">Транскрибация (speech-to-text)</option>
-              <option value="translate">Перевод (speech-to-English)</option>
+              <option value="transcribe">Транскрибация</option>
+              <option value="translate">Перевод на английский</option>
+              <option value="translate_other">Перевод на другой язык</option>
+            </select>
+            <small v-if="whisperSettings.task === 'translate_other'" class="task-hint">При первом использовании потребуется загрузка модели перевода (~100 МБ).</small>
+          </div>
+          <div class="setting-item" v-if="whisperSettings.task === 'translate_other'">
+            <label for="target-lang-select-audio">Целевой язык:</label>
+            <select id="target-lang-select-audio" v-model="whisperSettings.targetLanguage" class="model-select">
+              <option value="Russian">Русский</option>
+              <option value="English">Английский</option>
+              <option value="Spanish">Испанский</option>
+              <option value="French">Французский</option>
+              <option value="German">Немецкий</option>
+              <option value="Arabic">Арабский</option>
+              <option value="Chinese">Китайский</option>
+              <option value="Japanese">Японский</option>
+              <option value="Portuguese">Португальский</option>
+              <option value="Italian">Итальянский</option>
             </select>
           </div>
         </div>
@@ -196,10 +217,10 @@
       </div>
     </div>
     
-    <div v-if="activeTab === 'video'" class="tab-content">
+    <div v-if="activeTab === 'video' && !loading" class="tab-content">
       <div class="section-card">
         <h3 class="section-title">🎬 Видео файлы</h3>
-        <p class="section-description">Создание субтитров из видео файлов с компьютера. Загрузите файлы в формате MP4, AVI, MOV, MKV или WEBM — субтитры будут сохранены в папку Downloads.</p>
+        <p class="section-description">Создание субтитров или стенограммы из видео файлов с компьютера. Загрузите файлы в формате MP4, AVI, MOV, MKV или WEBM — результат будет сохранён в папку Downloads.</p>
         <div class="upload-area">
           <input
             type="file"
@@ -239,7 +260,7 @@
             <select id="language-select-video" v-model="whisperSettings.language" class="model-select">
               <option value="Russian">Русский</option>
               <option value="English">Английский</option>
-              <option value="Ukrainian">Украинский</option>
+              <option value="Arabic">Арабский</option>
               <option value="">Автоопределение</option>
             </select>
           </div>
@@ -258,8 +279,25 @@
           <div class="setting-item">
             <label for="task-select-video">Задача:</label>
             <select id="task-select-video" v-model="whisperSettings.task" class="model-select">
-              <option value="transcribe">Транскрибация (speech-to-text)</option>
-              <option value="translate">Перевод (speech-to-English)</option>
+              <option value="transcribe">Транскрибация</option>
+              <option value="translate">Перевод на английский</option>
+              <option value="translate_other">Перевод на другой язык</option>
+            </select>
+            <small v-if="whisperSettings.task === 'translate_other'" class="task-hint">При первом использовании потребуется загрузка модели перевода (~100 МБ).</small>
+          </div>
+          <div class="setting-item" v-if="whisperSettings.task === 'translate_other'">
+            <label for="target-lang-select-video">Целевой язык:</label>
+            <select id="target-lang-select-video" v-model="whisperSettings.targetLanguage" class="model-select">
+              <option value="Russian">Русский</option>
+              <option value="English">Английский</option>
+              <option value="Spanish">Испанский</option>
+              <option value="French">Французский</option>
+              <option value="German">Немецкий</option>
+              <option value="Arabic">Арабский</option>
+              <option value="Chinese">Китайский</option>
+              <option value="Japanese">Японский</option>
+              <option value="Portuguese">Португальский</option>
+              <option value="Italian">Итальянский</option>
             </select>
           </div>
         </div>
@@ -288,7 +326,7 @@
       </div>
     </div>
     
-    <div v-if="activeTab === 'youtube'" class="tab-content">
+    <div v-if="activeTab === 'youtube' && !loading" class="tab-content">
       <div class="section-card">
         <h3 class="section-title">YouTube</h3>
         <p class="section-description">Транскрибация видео с YouTube. Вставьте ссылку — аудио будет скачано и распознано, результат сохранится в папку Downloads.</p>
@@ -324,7 +362,7 @@
             <select id="language-select-youtube" v-model="whisperSettings.language" class="model-select">
               <option value="Russian">Русский</option>
               <option value="English">Английский</option>
-              <option value="Ukrainian">Украинский</option>
+              <option value="Arabic">Арабский</option>
               <option value="">Автоопределение</option>
             </select>
           </div>
@@ -343,8 +381,25 @@
           <div class="setting-item">
             <label for="task-select-youtube">Задача:</label>
             <select id="task-select-youtube" v-model="whisperSettings.task" class="model-select">
-              <option value="transcribe">Транскрибация (speech-to-text)</option>
-              <option value="translate">Перевод (speech-to-English)</option>
+              <option value="transcribe">Транскрибация</option>
+              <option value="translate">Перевод на английский</option>
+              <option value="translate_other">Перевод на другой язык</option>
+            </select>
+            <small v-if="whisperSettings.task === 'translate_other'" class="task-hint">При первом использовании потребуется загрузка модели перевода (~100 МБ).</small>
+          </div>
+          <div class="setting-item" v-if="whisperSettings.task === 'translate_other'">
+            <label for="target-lang-select-youtube">Целевой язык:</label>
+            <select id="target-lang-select-youtube" v-model="whisperSettings.targetLanguage" class="model-select">
+              <option value="Russian">Русский</option>
+              <option value="English">Английский</option>
+              <option value="Spanish">Испанский</option>
+              <option value="French">Французский</option>
+              <option value="German">Немецкий</option>
+              <option value="Arabic">Арабский</option>
+              <option value="Chinese">Китайский</option>
+              <option value="Japanese">Японский</option>
+              <option value="Portuguese">Португальский</option>
+              <option value="Italian">Итальянский</option>
             </select>
           </div>
         </div>
@@ -380,7 +435,7 @@
       </div>
     </div>
 
-    <div v-if="activeTab === 'record'" class="tab-content">
+    <div v-if="activeTab === 'record' && !loading" class="tab-content">
       <div class="section-card">
         <h3 class="section-title">🎤 Запись</h3>
         <p class="section-description">
@@ -483,7 +538,7 @@
             <select id="language-select-record" v-model="whisperSettings.language" class="model-select" :disabled="recordState !== 'idle' || loading">
               <option value="Russian">Русский</option>
               <option value="English">Английский</option>
-              <option value="Ukrainian">Украинский</option>
+              <option value="Arabic">Арабский</option>
               <option value="">Автоопределение</option>
             </select>
           </div>
@@ -491,8 +546,25 @@
           <div class="setting-item">
             <label for="task-select-record">Задача:</label>
             <select id="task-select-record" v-model="whisperSettings.task" class="model-select" :disabled="recordState !== 'idle' || loading">
-              <option value="transcribe">Транскрибация (speech-to-text)</option>
-              <option value="translate">Перевод (speech-to-English)</option>
+              <option value="transcribe">Транскрибация</option>
+              <option value="translate">Перевод на английский</option>
+              <option value="translate_other">Перевод на другой язык</option>
+            </select>
+            <small v-if="whisperSettings.task === 'translate_other'" class="task-hint">При первом использовании потребуется загрузка модели перевода (~100 МБ).</small>
+          </div>
+          <div class="setting-item" v-if="whisperSettings.task === 'translate_other'">
+            <label for="target-lang-select-record">Целевой язык:</label>
+            <select id="target-lang-select-record" v-model="whisperSettings.targetLanguage" class="model-select" :disabled="recordState !== 'idle' || loading">
+              <option value="Russian">Русский</option>
+              <option value="English">Английский</option>
+              <option value="Spanish">Испанский</option>
+              <option value="French">Французский</option>
+              <option value="German">Немецкий</option>
+              <option value="Arabic">Арабский</option>
+              <option value="Chinese">Китайский</option>
+              <option value="Japanese">Японский</option>
+              <option value="Portuguese">Португальский</option>
+              <option value="Italian">Итальянский</option>
             </select>
           </div>
         </div>
@@ -523,7 +595,7 @@
       </div>
     </div>
 
-    <div v-if="activeTab === 'telegram'" class="tab-content">
+    <div v-if="activeTab === 'telegram' && !loading" class="tab-content">
       <div class="section-card" style="margin-bottom: 1.5rem;">
         <h3 class="section-title">Импорт из Telegram</h3>
         <div class="section-description">
@@ -617,7 +689,7 @@
               <select id="language-select-telegram" v-model="whisperSettings.language" class="model-select">
                 <option value="Russian">Русский</option>
                 <option value="English">Английский</option>
-                <option value="Ukrainian">Украинский</option>
+                <option value="Arabic">Арабский</option>
                 <option value="">Автоопределение</option>
               </select>
             </div>
@@ -637,7 +709,24 @@
               <label for="task-select-telegram">Задача:</label>
               <select id="task-select-telegram" v-model="whisperSettings.task" class="model-select">
                 <option value="transcribe">Транскрибация</option>
-                <option value="translate">Перевод</option>
+                <option value="translate">Перевод на английский</option>
+                <option value="translate_other">Перевод на другой язык</option>
+              </select>
+              <small v-if="whisperSettings.task === 'translate_other'" class="task-hint">При первом использовании потребуется загрузка модели перевода (~100 МБ).</small>
+            </div>
+            <div class="setting-item" v-if="whisperSettings.task === 'translate_other'">
+              <label for="target-lang-select-telegram">Целевой язык:</label>
+              <select id="target-lang-select-telegram" v-model="whisperSettings.targetLanguage" class="model-select">
+                <option value="Russian">Русский</option>
+                <option value="English">Английский</option>
+                <option value="Spanish">Испанский</option>
+                <option value="French">Французский</option>
+                <option value="German">Немецкий</option>
+                <option value="Arabic">Арабский</option>
+                <option value="Chinese">Китайский</option>
+                <option value="Japanese">Японский</option>
+                <option value="Portuguese">Португальский</option>
+                <option value="Italian">Итальянский</option>
               </select>
             </div>
           </div>
@@ -815,6 +904,24 @@ const updateCheckStatus = ref('idle')
 const updateCheckMessage = ref('')
 const setupStatus = ref({ stage: 'pending', message: '' })
 
+const keepAwake = ref(false)
+try {
+  keepAwake.value = localStorage.getItem('sheptun.keepAwake') === '1'
+} catch {}
+
+const applyKeepAwake = async () => {
+  try {
+    localStorage.setItem('sheptun.keepAwake', keepAwake.value ? '1' : '0')
+  } catch {}
+  if (!isTauri()) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('set_keep_awake', { enabled: keepAwake.value })
+  } catch (err) {
+    console.error('set_keep_awake failed:', err)
+  }
+}
+
 const installUpdate = async () => {
   if (!isTauri()) return
   try {
@@ -873,7 +980,8 @@ const whisperSettings = ref({
   language: 'Russian',
   outputFormat: 'txt',
   initialPrompt: 'Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.',
-  task: 'transcribe'
+  task: 'transcribe',
+  targetLanguage: 'Russian'
 })
 
 const audioInputDevices = ref([])
@@ -934,11 +1042,13 @@ const transcribeVideo = async () => {
   })
 
   try {
+    const isTranslateOther = whisperSettings.value.task === 'translate_other'
     const params = new URLSearchParams({
       model: whisperSettings.value.model === 'small' ? 'medium' : whisperSettings.value.model,
       language: whisperSettings.value.task === 'translate' ? 'English' : (whisperSettings.value.language || ''),
       output_format: whisperSettings.value.outputFormat === 'txt' ? 'srt' : whisperSettings.value.outputFormat,
-      task: whisperSettings.value.task
+      task: isTranslateOther ? 'transcribe' : whisperSettings.value.task,
+      ...(isTranslateOther ? { target_language: whisperSettings.value.targetLanguage } : {})
     })
     const response = await fetch(`${await apiUrl('/transcribe/video')}?${params.toString()}`, {
       method: 'POST',
@@ -1055,13 +1165,15 @@ const transcribeYoutube = async () => {
   }
 
   try {
+    const isTranslateOther = whisperSettings.value.task === 'translate_other'
     const params = new URLSearchParams({
       url: youtubeUrl.value,
       model: whisperSettings.value.model,
       language: whisperSettings.value.language || '',
       output_format: whisperSettings.value.outputFormat,
       initial_prompt: whisperSettings.value.initialPrompt,
-      task: whisperSettings.value.task
+      task: isTranslateOther ? 'transcribe' : whisperSettings.value.task,
+      ...(isTranslateOther ? { target_language: whisperSettings.value.targetLanguage } : {})
     })
 
     const response = await fetch(`${await apiUrl('/transcribe/youtube')}?${params.toString()}`, {
@@ -1207,12 +1319,14 @@ const transcribe = async () => {
   })
 
   try {
+    const isTranslateOther = whisperSettings.value.task === 'translate_other'
     const params = new URLSearchParams({
       model: whisperSettings.value.model,
       language: whisperSettings.value.language || '',
       output_format: whisperSettings.value.outputFormat,
       initial_prompt: whisperSettings.value.initialPrompt,
-      task: whisperSettings.value.task
+      task: isTranslateOther ? 'transcribe' : whisperSettings.value.task,
+      ...(isTranslateOther ? { target_language: whisperSettings.value.targetLanguage } : {})
     })
     const response = await fetch(`${await apiUrl('/transcribe')}?${params.toString()}`, {
       method: 'POST',
@@ -1378,12 +1492,15 @@ const transcribeTelegram = async () => {
   }
   
   try {
+    const isTranslateOther = whisperSettings.value.task === 'translate_other'
     const params = new URLSearchParams({
       folder_name: selectedTelegramFolder.value,
       model: whisperSettings.value.model,
       language: whisperSettings.value.language || '',
       output_format: whisperSettings.value.outputFormat,
-      initial_prompt: whisperSettings.value.initialPrompt
+      initial_prompt: whisperSettings.value.initialPrompt,
+      task: isTranslateOther ? 'transcribe' : whisperSettings.value.task,
+      ...(isTranslateOther ? { target_language: whisperSettings.value.targetLanguage } : {})
     })
     
     const response = await fetch(`${await apiUrl('/transcribe/telegram')}?${params.toString()}`, {
@@ -1698,12 +1815,14 @@ const transcribeRecordedBlob = async (blob) => {
   formData.append('files', new File([blob], filename, { type: blob.type || `audio/${ext}` }))
 
   try {
+    const isTranslateOther = whisperSettings.value.task === 'translate_other'
     const params = new URLSearchParams({
       model: whisperSettings.value.model,
       language: whisperSettings.value.language || '',
       output_format: 'txt',
       initial_prompt: whisperSettings.value.initialPrompt,
-      task: whisperSettings.value.task
+      task: isTranslateOther ? 'transcribe' : whisperSettings.value.task,
+      ...(isTranslateOther ? { target_language: whisperSettings.value.targetLanguage } : {})
     })
     const response = await fetch(`${await apiUrl('/transcribe')}?${params.toString()}`, {
       method: 'POST',
@@ -1915,6 +2034,9 @@ onMounted(async () => {
     } catch (err) {
       console.error('getVersion failed:', err)
     }
+    if (keepAwake.value) {
+      applyKeepAwake()
+    }
   }
 
   if (navigator.mediaDevices?.enumerateDevices) {
@@ -1976,22 +2098,41 @@ onUnmounted(() => {
   }
 })
 
+const sendCompletionNotification = async () => {
+  try {
+    const { isPermissionGranted, requestPermission, sendNotification } =
+      await import('@tauri-apps/plugin-notification')
+    let granted = await isPermissionGranted()
+    if (!granted) {
+      const permission = await requestPermission()
+      granted = permission === 'granted'
+    }
+    if (granted) {
+      sendNotification({ title: 'Sheptun', body: 'Транскрипция завершена' })
+    }
+  } catch (e) {
+    console.warn('Notification failed:', e)
+  }
+}
+
 const playCompletionSound = () => {
   const audioContext = new (window.AudioContext || window.webkitAudioContext)()
   const oscillator = audioContext.createOscillator()
   const gainNode = audioContext.createGain()
-  
+
   oscillator.connect(gainNode)
   gainNode.connect(audioContext.destination)
-  
+
   oscillator.frequency.value = 800
   oscillator.type = 'sine'
-  
+
   gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
   gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
-  
+
   oscillator.start(audioContext.currentTime)
   oscillator.stop(audioContext.currentTime + 0.5)
+
+  sendCompletionNotification()
 }
 </script>
 
@@ -2848,6 +2989,34 @@ input[type="file"]:disabled {
   color: #007bff;
 }
 
+.keep-awake-toggle {
+  position: absolute;
+  right: 4.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #555;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  transition: all 0.2s;
+}
+
+.keep-awake-toggle:hover {
+  border-color: #007bff;
+  color: #007bff;
+}
+
+.keep-awake-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .update-banner {
   background: #d4edda;
   color: #155724;
@@ -3044,6 +3213,14 @@ input[type="file"]:disabled {
 
 .record-hint--error {
   color: #c62828;
+}
+
+.task-hint {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--text-secondary, #888);
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .record-controls {

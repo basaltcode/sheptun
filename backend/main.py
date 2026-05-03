@@ -191,6 +191,142 @@ def update_yt_dlp():
         logger.warning(f"Failed to update yt-dlp: {e}")
 
 
+ARGOS_LANG_CODES = {
+    "Russian": "ru", "English": "en", "Spanish": "es", "French": "fr",
+    "German": "de", "Arabic": "ar", "Chinese": "zh", "Japanese": "ja",
+    "Portuguese": "pt", "Italian": "it",
+}
+
+
+def is_argos_installed() -> bool:
+    """Check whether argostranslate is importable in the whisper venv."""
+    whisper_python = get_whisper_python()
+    if not whisper_python.exists():
+        return False
+    try:
+        result = subprocess.run(
+            [str(whisper_python), '-c', 'import argostranslate.translate'],
+            capture_output=True, timeout=10
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def install_argos(progress_callback=None):
+    """Install argostranslate package into the whisper venv. Reports progress lines via callback."""
+    pip = WHISPER_VENV_DIR / ("Scripts" if sys.platform == 'win32' else "bin") / "pip"
+    if not pip.exists():
+        whisper_python = get_whisper_python()
+        cmd = [str(whisper_python), '-m', 'pip', 'install', 'argostranslate']
+    else:
+        cmd = [str(pip), 'install', 'argostranslate']
+
+    popen_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    if sys.platform == 'win32':
+        popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    for line in proc.stdout:
+        if progress_callback:
+            progress_callback(line.rstrip())
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError("Не удалось установить argostranslate")
+
+
+def ensure_argos_language_pair(src_code: str, tgt_code: str, progress_callback=None):
+    """Download argos translation model for src->tgt if not already installed.
+    Some pairs go via English (pivot) - install both legs."""
+    whisper_python = get_whisper_python()
+    if src_code == tgt_code:
+        return
+    script = f'''
+import argostranslate.package, argostranslate.translate
+argostranslate.package.update_package_index()
+available = argostranslate.package.get_available_packages()
+def install_pair(src, tgt):
+    pkg = next((p for p in available if p.from_code == src and p.to_code == tgt), None)
+    if pkg is None:
+        return False
+    installed = argostranslate.package.get_installed_packages()
+    if any(p.from_code == src and p.to_code == tgt for p in installed):
+        print(f"already installed: {{src}}->{{tgt}}", flush=True)
+        return True
+    print(f"downloading: {{src}}->{{tgt}}", flush=True)
+    path = pkg.download()
+    argostranslate.package.install_from_path(path)
+    print(f"installed: {{src}}->{{tgt}}", flush=True)
+    return True
+src, tgt = {src_code!r}, {tgt_code!r}
+if not install_pair(src, tgt):
+    if src != "en" and tgt != "en":
+        print(f"no direct pair, trying pivot via English", flush=True)
+        ok1 = install_pair(src, "en")
+        ok2 = install_pair("en", tgt)
+        if not (ok1 and ok2):
+            raise SystemExit(f"No translation path for {{src}}->{{tgt}}")
+    else:
+        raise SystemExit(f"No translation pair for {{src}}->{{tgt}}")
+print("done", flush=True)
+'''
+    popen_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=get_env_with_deps())
+    if sys.platform == 'win32':
+        popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+    proc = subprocess.Popen([str(whisper_python), '-c', script], **popen_kwargs)
+    for line in proc.stdout:
+        if progress_callback:
+            progress_callback(line.rstrip())
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"Не удалось загрузить модель перевода {src_code}->{tgt_code}")
+
+
+def translate_text_with_argos(text: str, src_code: str, tgt_code: str) -> str:
+    """Translate plain text using argostranslate (must already be installed)."""
+    whisper_python = get_whisper_python()
+    script = f'''
+import sys, argostranslate.translate
+text = sys.stdin.read()
+result = argostranslate.translate.translate(text, {src_code!r}, {tgt_code!r})
+sys.stdout.write(result)
+'''
+    popen_kwargs = dict(stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=get_env_with_deps())
+    if sys.platform == 'win32':
+        popen_kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+    proc = subprocess.Popen([str(whisper_python), '-c', script], **popen_kwargs)
+    stdout, stderr = proc.communicate(input=text, timeout=600)
+    if proc.returncode != 0:
+        raise RuntimeError(f"Translation failed: {stderr}")
+    return stdout
+
+
+def translate_output_file(file_path: Path, src_code: str, tgt_code: str, output_format: str) -> Path:
+    """Translate Whisper output file in-place, preserving timestamps for srt/vtt."""
+    content = file_path.read_text(encoding='utf-8')
+    if output_format == 'txt':
+        translated = translate_text_with_argos(content, src_code, tgt_code)
+    elif output_format in ('srt', 'vtt'):
+        lines = content.split('\n')
+        out_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if (not stripped
+                or stripped.isdigit()
+                or '-->' in stripped
+                or stripped.upper().startswith('WEBVTT')):
+                out_lines.append(line)
+            else:
+                try:
+                    out_lines.append(translate_text_with_argos(line, src_code, tgt_code).rstrip('\n'))
+                except Exception:
+                    out_lines.append(line)
+        translated = '\n'.join(out_lines)
+    else:
+        translated = translate_text_with_argos(content, src_code, tgt_code)
+    file_path.write_text(translated, encoding='utf-8')
+    return file_path
+
+
 def get_env_with_deps() -> dict:
     """Return env with venv bin dir prepended to PATH (for ffmpeg, yt-dlp access)."""
     env = os.environ.copy()
@@ -229,6 +365,30 @@ async def startup_event():
             logger.error(f"Failed to setup whisper: {e}")
     threading.Thread(target=_setup, daemon=True).start()
 
+def _maybe_translate_file(task_id: str, file_path: Path, language: str, target_language: str, output_format: str):
+    """Translate output file via argos if target_language provided. Best-effort: errors are logged but do not abort."""
+    if not target_language or target_language not in ARGOS_LANG_CODES:
+        return
+    src_code = ARGOS_LANG_CODES.get(language, "auto")
+    if language not in ARGOS_LANG_CODES:
+        src_code = "en"
+    tgt_code = ARGOS_LANG_CODES[target_language]
+    if src_code == tgt_code:
+        return
+    try:
+        if not is_argos_installed():
+            progress_store[task_id]["message"] = "Установка argostranslate..."
+            install_argos(progress_callback=lambda l: progress_store[task_id].update({"last_log": l}))
+        progress_store[task_id]["message"] = f"Загрузка модели перевода {src_code}->{tgt_code}..."
+        progress_store[task_id]["status"] = "translating"
+        ensure_argos_language_pair(src_code, tgt_code, progress_callback=lambda l: progress_store[task_id].update({"last_log": l}))
+        progress_store[task_id]["message"] = "Перевод текста..."
+        translate_output_file(file_path, src_code, tgt_code, output_format)
+    except Exception as e:
+        logger.error(f"Translation failed: {e}")
+        progress_store[task_id]["last_log"] = f"Ошибка перевода: {e}"
+
+
 async def process_audio_files_async(
     file_paths: List[dict],
     task_id: str,
@@ -236,7 +396,8 @@ async def process_audio_files_async(
     language: str = "Russian",
     output_format: str = "txt",
     initial_prompt: str = "",
-    task: str = "transcribe"
+    task: str = "transcribe",
+    target_language: str = ""
 ):
     import threading
     import queue
@@ -475,6 +636,7 @@ async def process_audio_files_async(
                     if final_output.exists():
                         final_output.unlink()
                     whisper_output.rename(final_output)
+                    _maybe_translate_file(task_id, final_output, language, target_language, output_format)
 
             # clean extra formats
             for ext in [".srt", ".vtt", ".json", ".tsv", ".txt"]:
@@ -510,6 +672,7 @@ async def process_audio_files_async(
             merged_file = DOWNLOADS_DIR / out_name
             with open(merged_file, "w", encoding="utf-8") as f:
                 f.write(merged_text)
+            _maybe_translate_file(task_id, merged_file, language, target_language, "txt")
             output_file_name = out_name
         else:
             if total_files == 1:
@@ -550,6 +713,7 @@ async def transcribe_audio(
     output_format: str = "txt",
     initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.",
     task: str = "transcribe",
+    target_language: str = "",
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     if not files:
@@ -590,7 +754,7 @@ async def transcribe_audio(
 
     background_tasks.add_task(
         process_audio_files_async,
-        file_paths, task_id, model, language, output_format, initial_prompt, task
+        file_paths, task_id, model, language, output_format, initial_prompt, task, target_language
     )
 
     return JSONResponse(
@@ -721,7 +885,9 @@ async def process_telegram_files_async(
     model: str = "small",
     language: str = "Russian",
     output_format: str = "txt",
-    initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией."
+    initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.",
+    task: str = "transcribe",
+    target_language: str = ""
 ):
     try:
         active_tasks[task_id] = True
@@ -812,14 +978,15 @@ async def process_telegram_files_async(
                 str(get_whisper_python()), "-m", "whisper",
                 str(file_path),
                 "--model", model,
+                "--task", task,
                 "--output_format", output_format,
                 "--output_dir", str(DOWNLOADS_DIR),
                 "--verbose", "False"
             ]
-            
+
             if language:
                 whisper_cmd.extend(["--language", language])
-            
+
             if initial_prompt:
                 whisper_cmd.extend(["--initial_prompt", initial_prompt])
             
@@ -1060,10 +1227,12 @@ async def process_telegram_files_async(
         
         merged_text = "\n\n".join(all_texts)
         merged_file = DOWNLOADS_DIR / "merged.txt"
-        
+
         with open(merged_file, "w", encoding="utf-8") as f:
             f.write(merged_text)
-        
+
+        _maybe_translate_file(task_id, merged_file, language, target_language, "txt")
+
         logger.info(f"Файл merged.txt сохранён в {merged_file}")
         progress_store[task_id] = {
             "status": "completed",
@@ -1101,6 +1270,8 @@ async def transcribe_telegram_files(
     language: str = "Russian",
     output_format: str = "txt",
     initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.",
+    task: str = "transcribe",
+    target_language: str = "",
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     folder_path = TELEGRAM_DIR / folder_name
@@ -1133,7 +1304,9 @@ async def transcribe_telegram_files(
         model,
         language,
         output_format,
-        initial_prompt
+        initial_prompt,
+        task,
+        target_language
     )
     
     return JSONResponse(
@@ -1155,6 +1328,7 @@ async def transcribe_video(
     language: str = "English",
     output_format: str = "srt",
     task: str = "translate",
+    target_language: str = "",
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     if not files:
@@ -1197,7 +1371,7 @@ async def transcribe_video(
 
     background_tasks.add_task(
         process_audio_files_async,
-        file_paths, task_id, model, language, output_format, "", task
+        file_paths, task_id, model, language, output_format, "", task, target_language
     )
 
     return JSONResponse(
@@ -1213,6 +1387,7 @@ async def transcribe_youtube(
     output_format: str = "txt",
     initial_prompt: str = "Это связная лекция на русском языке. Оформляй текст абзацами, с нормальной пунктуацией.",
     task: str = "transcribe",
+    target_language: str = "",
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     if not url:
@@ -1237,7 +1412,7 @@ async def transcribe_youtube(
 
     background_tasks.add_task(
         process_youtube_async,
-        url, task_id, model, language, output_format, initial_prompt, task
+        url, task_id, model, language, output_format, initial_prompt, task, target_language
     )
 
     return JSONResponse(
@@ -1253,7 +1428,8 @@ async def process_youtube_async(
     language: str = "Russian",
     output_format: str = "txt",
     initial_prompt: str = "",
-    task: str = "transcribe"
+    task: str = "transcribe",
+    target_language: str = ""
 ):
     tmp_dir = None
     try:
@@ -1452,7 +1628,7 @@ async def process_youtube_async(
 
         # Delegate to the audio processing function — it manages progress_store and active_tasks
         await process_audio_files_async(
-            file_paths, task_id, model, language, output_format, initial_prompt, task
+            file_paths, task_id, model, language, output_format, initial_prompt, task, target_language
         )
 
     except Exception as e:

@@ -77,7 +77,7 @@ Open source приложение для локальной и бесплатно
 ### Linux
 
 1. Скачайте `.AppImage` файл по ссылке выше
-2. `chmod +x sheptun_2.1.1_amd64.AppImage && ./sheptun_2.1.1_amd64.AppImage`
+2. `chmod +x sheptun_2.1.2_amd64.AppImage && ./sheptun_2.1.2_amd64.AppImage`
 
 ## Использование
 

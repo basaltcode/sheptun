@@ -1,6 +1,6 @@
 {
   "name": "whisper-frontend",
-  "version": "2.1.0",
+  "version": "2.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -8,10 +8,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.3.4",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-updater": "^2",
-    "@tauri-apps/plugin-process": "^2"
+    "vue": "^3.3.4"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.4.0",
